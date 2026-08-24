@@ -5,6 +5,7 @@ import rateLimit from 'express-rate-limit';
 import pinoHttp from 'pino-http';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import { OAuth2Client } from 'google-auth-library';
 import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -24,7 +25,17 @@ const userId=(req:any)=>req.auth.sub as string;
 const num=(v:any)=>Number(v);
 
 app.get('/api/health',(_req,res)=>res.json({ok:true,version:process.env.APP_VERSION||'dev'}));
-app.post('/api/auth/login',rateLimit({windowMs:15*60_000,limit:10}),asyncRoute(async(req,res)=>{const body=z.object({username:z.string().min(1),password:z.string().min(1)}).parse(req.body);const user=await prisma.user.findUnique({where:{username:body.username}});if(!user||!await bcrypt.compare(body.password,user.passwordHash))return res.status(401).json({error:'Invalid login'});res.json({token:jwt.sign({sub:user.id,name:user.displayName},secret,{expiresIn:'30d'}),user:{name:user.displayName}});}));
+app.post('/api/auth/login',rateLimit({windowMs:15*60_000,limit:10}),asyncRoute(async(req,res)=>{const body=z.object({username:z.string().min(1),password:z.string().min(1)}).parse(req.body);const user=await prisma.user.findUnique({where:{username:body.username}});if(!user?.passwordHash||!await bcrypt.compare(body.password,user.passwordHash))return res.status(401).json({error:'Invalid login'});res.json(authResponse(user));}));
+app.post('/api/auth/google',rateLimit({windowMs:15*60_000,limit:30}),asyncRoute(async(req,res)=>{
+  const clientId=process.env.GOOGLE_CLIENT_ID;if(!clientId)return res.status(503).json({error:'Google sign-in is not configured'});
+  const {credential}=z.object({credential:z.string().min(20)}).parse(req.body);
+  const ticket=await new OAuth2Client(clientId).verifyIdToken({idToken:credential,audience:clientId});
+  const p=ticket.getPayload();if(!p?.sub||!p.email||p.email_verified===false)return res.status(401).json({error:'Google account could not be verified'});
+  let user=await prisma.user.findFirst({where:{OR:[{googleSub:p.sub},{email:p.email}]}});
+  if(!user){user=await prisma.user.create({data:{username:`google-${p.sub}`,googleSub:p.sub,email:p.email,displayName:p.name||p.email.split('@')[0]}});await provisionStarterProgram(user.id);}
+  else if(!user.googleSub)user=await prisma.user.update({where:{id:user.id},data:{googleSub:p.sub,email:p.email}});
+  res.json(authResponse(user));
+}));
 
 app.get('/api/dashboard',auth,asyncRoute(async(req,res)=>{const uid=userId(req);const program=await prisma.workoutProgram.findFirst({where:{userId:uid,active:true},include:{templates:true}});const last=await prisma.workoutSession.findFirst({where:{userId:uid,status:'completed'},orderBy:{finishedAt:'desc'},include:{exercises:{include:{sets:true,exercise:true}}}});const weights=await prisma.bodyWeightEntry.findMany({where:{userId:uid},orderBy:{date:'asc'}});const u=await prisma.user.findUniqueOrThrow({where:{id:uid}});const achievements=last?.exercises.flatMap(x=>shouldSuggestIncrease(x.sets,x.plannedSets,x.maxReps)?[`${x.exercise.nameEn}: ${x.maxReps}/${x.maxReps}/${x.maxReps} reached`]:[]).slice(0,3)||[];res.json({nextWorkout:program?nextWorkoutDay(new Date(),program.preferredWeekdays):null,template:program?.templates[0]||null,last:last?sessionSummary(last):null,currentWeight:weights.at(-1)?num(weights.at(-1)!.weight):null,weightChange:weights.at(-1)&&u.startingWeightKg?num(weights.at(-1)!.weight)-num(u.startingWeightKg):null,achievements});}));
 
@@ -57,3 +68,13 @@ const sessionInclude={template:true,exercises:{orderBy:{sortOrder:'asc' as const
 function serializeExercise(e:any){return {...e,defaultIncrement:e.defaultIncrement===undefined?undefined:num(e.defaultIncrement),machines:e.machines?.map((m:any)=>({...m,weightIncrement:m.weightIncrement===null?null:num(m.weightIncrement),availableWeights:m.availableWeights.map(num)}))};}
 function serializeSession(s:any){return {...s,summary:sessionSummary(s),exercises:s.exercises.map((e:any)=>({...e,exercise:serializeExercise(e.exercise),sets:e.sets.map((x:any)=>({...x,weight:num(x.weight)})),suggestIncrease:shouldSuggestIncrease(e.sets,e.plannedSets,e.maxReps)}))};}
 function sessionSummary(s:any){const sets=s.exercises.flatMap((e:any)=>e.sets);return {durationMinutes:s.finishedAt?Math.max(1,Math.round((new Date(s.finishedAt).getTime()-new Date(s.startedAt).getTime())/60000)):null,exerciseCount:s.exercises.filter((e:any)=>e.sets.length).length,setCount:sets.length,volume:volume(sets.map((x:any)=>({weight:num(x.weight),reps:x.reps})))};}
+function authResponse(user:any){return {token:jwt.sign({sub:user.id,name:user.displayName},secret!,{expiresIn:'30d'}),user:{name:user.displayName,email:user.email}};}
+async function provisionStarterProgram(uid:string){
+  const exercises=await prisma.exercise.findMany({where:{archived:false},orderBy:{createdAt:'asc'}});
+  const program=await prisma.workoutProgram.create({data:{userId:uid,name:'Full Body 3× weekly',active:true,preferredWeekdays:[3,5,0]}});
+  await prisma.workoutTemplate.create({data:{
+    programId:program.id,
+    name:'Full Body',
+    exercises:{create:exercises.map((e,i)=>({exerciseId:e.id,sortOrder:i+1,sets:e.defaultSets,minReps:e.minReps,maxReps:e.maxReps,restSeconds:e.defaultRestSeconds,increment:e.defaultIncrement}))}
+  }});
+}

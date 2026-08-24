@@ -33,6 +33,10 @@ Open `http://localhost:3210`. Uploaded images and PostgreSQL data live in named 
 
 ## Production
 
+Google sign-in uses Google Identity Services. Create an OAuth 2.0 **Web application** client, add `https://fit.kir-it.de` as an authorized JavaScript origin, and set `GOOGLE_CLIENT_ID` in `.env`. The same ID is injected into the frontend at build time and verified by the API.
+
+Without an account the app runs fully in guest mode. Workouts, history, exercise progress and body weight are stored in browser `localStorage`; the UI permanently warns that browser-local data can be lost.
+
 Production uses `/opt/kir-fit/repo`, a root-owned `.env`, Docker Compose, and a Plesk/nginx reverse proxy to `127.0.0.1:3210`. GitHub Actions runs type checks, tests, a production build and a Docker build before invoking `deploy/deploy.sh`. The script is locked, migrates before startup, seeds idempotently, restarts only the app stack, and checks the local health endpoint. CI then checks the public HTTPS endpoint.
 
 ## Reliability notes

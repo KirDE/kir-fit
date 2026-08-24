@@ -10,7 +10,9 @@ datasource db {
 model User {
   id String @id @default(cuid())
   username String @unique
-  passwordHash String
+  passwordHash String?
+  email String? @unique
+  googleSub String? @unique
   displayName String
   heightCm Int?
   startingWeightKg Decimal? @db.Decimal(6,2)
@@ -27,7 +29,9 @@ model Exercise {
   nameDe String
   nameRu String?
   description String
+  descriptionDe String?
   instructions String
+  instructionsDe String?
   targetMuscles String[]
   equipmentType String
   exerciseType String

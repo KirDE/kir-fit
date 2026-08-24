@@ -15,7 +15,10 @@ services:
       retries: 20
     networks: [internal]
   app:
-    build: .
+    build:
+      context: .
+      args:
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     restart: unless-stopped
     environment:
       DATABASE_URL: ${DATABASE_URL}
@@ -23,6 +26,7 @@ services:
       APP_USERNAME: ${APP_USERNAME}
       APP_PASSWORD: ${APP_PASSWORD}
       ORIGIN: ${ORIGIN}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       APP_VERSION: ${APP_VERSION:-local}
       UPLOAD_DIR: /app/uploads
       PORT: 3000
@@ -34,7 +38,10 @@ services:
       - "127.0.0.1:${APP_PORT:-3210}:3000"
     networks: [internal]
   seed:
-    build: .
+    build:
+      context: .
+      args:
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     profiles: [seed]
     environment:
       DATABASE_URL: ${DATABASE_URL}

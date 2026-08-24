@@ -12,6 +12,16 @@ const exercises = [
   ['triceps-pushdown','Triceps Pushdown','Trizeps am Kabel','Разгибание рук','A cable station where a bar or rope is pushed down by extending the elbows.','Pin elbows beside the torso and move only the forearms.',['Triceps'],'cable','isolation',2,10,15,90,2.5],
   ['biceps-curl','Biceps Curl','Bizeps Curl','Сгибание рук','A machine or cable station used to curl the forearms toward the shoulders.','Keep upper arms still and lower under control.',['Biceps'],'machine','isolation',2,10,15,90,2.5],
 ] as const;
+const germanCopy: Record<string,[string,string]> = {
+  'leg-press':['Sitzende Maschine mit einer Gewichtsplattform, die mit beiden Beinen weggedrückt wird.','Rücken anlehnen, Knie in Richtung der Zehen führen und nicht vollständig durchstrecken.'],
+  'chest-press':['Sitzende Maschine, deren Griffe auf Brusthöhe nach vorne gedrückt werden.','Sitz so einstellen, dass die Griffe auf mittlerer Brusthöhe liegen. Schulterblätter zurückziehen und langsam absenken.'],
+  'lat-pulldown':['Kabelzug mit oberer Stange, die zur oberen Brust gezogen wird.','Nur leicht zurücklehnen, Ellbogen nach unten ziehen und nicht schwingen.'],
+  'seated-row':['Sitzender Kabelzug oder eine Maschine, deren Griffe zum Oberkörper gezogen werden.','Oberkörper ruhig halten und die Schulterblätter ohne Hochziehen zusammenführen.'],
+  'leg-curl':['Sitzende oder liegende Maschine, bei der die Knie gegen eine gepolsterte Rolle gebeugt werden.','Knie am Drehpunkt ausrichten und die Rückbewegung kontrollieren.'],
+  'shoulder-press':['Sitzende Maschine, deren Griffe von Schulterhöhe nach oben gedrückt werden.','Rippen unten halten und die Ellbogen nicht vollständig durchstrecken.'],
+  'triceps-pushdown':['Kabelstation, an der Stange oder Seil durch Strecken der Ellbogen nach unten gedrückt werden.','Ellbogen am Oberkörper fixieren und nur die Unterarme bewegen.'],
+  'biceps-curl':['Maschine oder Kabelstation, an der die Unterarme zu den Schultern gebeugt werden.','Oberarme ruhig halten und das Gewicht kontrolliert absenken.']
+};
 
 async function main() {
   const username = process.env.APP_USERNAME || 'kirill';
@@ -20,7 +30,12 @@ async function main() {
   const user = await prisma.user.upsert({where:{username},update:{},create:{username,passwordHash:await bcrypt.hash(password,12),displayName:'Kirill',heightCm:176,startingWeightKg:new Prisma.Decimal(99)}});
   for (let i=0;i<exercises.length;i++) {
     const [id,nameEn,nameDe,nameRu,description,instructions,targetMuscles,equipmentType,exerciseType,defaultSets,minReps,maxReps,defaultRestSeconds,defaultIncrement]=exercises[i];
-    await prisma.exercise.upsert({where:{id},update:{},create:{id,nameEn,nameDe,nameRu,description,instructions,targetMuscles:[...targetMuscles],equipmentType,exerciseType,defaultSets,minReps,maxReps,defaultRestSeconds,defaultIncrement:new Prisma.Decimal(defaultIncrement),images:{create:{path:`/exercise-images/${id}.svg`,caption:`${nameEn} / ${nameDe}`,sortOrder:0,isPrimary:true}}}});
+    const [descriptionDe,instructionsDe]=germanCopy[id];
+    const data={nameEn,nameDe,nameRu,description,descriptionDe,instructions,instructionsDe,targetMuscles:[...targetMuscles],equipmentType,exerciseType,defaultSets,minReps,maxReps,defaultRestSeconds,defaultIncrement:new Prisma.Decimal(defaultIncrement)};
+    await prisma.exercise.upsert({where:{id},update:data,create:{id,...data}});
+    const image=await prisma.exerciseImage.findFirst({where:{exerciseId:id,isPrimary:true}});
+    if(image)await prisma.exerciseImage.update({where:{id:image.id},data:{path:`/exercise-images/${id}.jpg`,caption:`${nameEn} / ${nameDe}`}});
+    else await prisma.exerciseImage.create({data:{exerciseId:id,path:`/exercise-images/${id}.jpg`,caption:`${nameEn} / ${nameDe}`,sortOrder:0,isPrimary:true}});
   }
   let program = await prisma.workoutProgram.findFirst({where:{userId:user.id,name:'Full Body 3× weekly'}});
   if (!program) program=await prisma.workoutProgram.create({data:{userId:user.id,name:'Full Body 3× weekly',active:true,preferredWeekdays:[3,5,0]}});
