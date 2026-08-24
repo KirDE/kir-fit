@@ -1,0 +1,42 @@
+name: CI and deploy
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env: {POSTGRES_USER: kirfit, POSTGRES_PASSWORD: test-password, POSTGRES_DB: kirfit}
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U kirfit" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://kirfit:test-password@localhost:5432/kirfit?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22, cache: npm}
+      - run: npm ci
+      - run: npm exec -w @kir-fit/api -- prisma validate --schema prisma/schema.prisma
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: docker build -t kir-fit:${{ github.sha }} .
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: /opt/kir-fit/repo/deploy/deploy.sh
+      - name: Verify production
+        run: curl --fail --retry 10 --retry-delay 5 https://fit.kir-it.de/api/health

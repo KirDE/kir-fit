@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [internal]
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      APP_USERNAME: ${APP_USERNAME}
+      APP_PASSWORD: ${APP_PASSWORD}
+      ORIGIN: ${ORIGIN}
+      APP_VERSION: ${APP_VERSION:-local}
+      UPLOAD_DIR: /app/uploads
+      PORT: 3000
+    depends_on:
+      db: {condition: service_healthy}
+    volumes:
+      - uploads:/app/uploads
+    ports:
+      - "127.0.0.1:${APP_PORT:-3210}:3000"
+    networks: [internal]
+  seed:
+    build: .
+    profiles: [seed]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      APP_USERNAME: ${APP_USERNAME}
+      APP_PASSWORD: ${APP_PASSWORD}
+    depends_on:
+      db: {condition: service_healthy}
+    command: ["sh","-c","npm exec -w @kir-fit/api -- prisma migrate deploy --schema prisma/schema.prisma && npm exec -w @kir-fit/api -- tsx prisma/seed.ts"]
+    networks: [internal]
+volumes:
+  postgres_data:
+  uploads:
+networks:
+  internal:
