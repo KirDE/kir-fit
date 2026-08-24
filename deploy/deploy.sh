@@ -15,4 +15,4 @@ docker compose up -d db
 docker compose run --rm seed
 docker compose up -d app
 docker compose ps
-curl --fail --retry 12 --retry-delay 3 http://127.0.0.1:3210/api/health
+curl --fail --retry 12 --retry-delay 3 --retry-all-errors http://127.0.0.1:3210/api/health
