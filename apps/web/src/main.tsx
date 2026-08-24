@@ -294,7 +294,8 @@ function Dashboard({
         <p className="eyebrow">{tr("nextWorkout")}</p>
         <h1>{days[next.getDay()]}</h1>
         <p>
-          {d.template?.name || "Full Body"} · 8 {lang === "ru" ? "упражнений" : tr("exercises").toLowerCase()}
+          {d.template?.name || "Full Body"} · 8{" "}
+          {lang === "ru" ? "упражнений" : tr("exercises").toLowerCase()}
         </p>
         <button className="primary big" onClick={start}>
           <Dumbbell /> {tr("startWorkout")}
@@ -475,6 +476,68 @@ function Workout({ done }: { done: () => void }) {
     </section>
   );
 }
+function ZoomableImage({
+  src,
+  alt,
+  compact = false,
+}: {
+  src: string;
+  alt: string;
+  compact?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: KeyboardEvent) =>
+      event.key === "Escape" && setOpen(false);
+    addEventListener("keydown", close);
+    document.body.classList.add("lightbox-open");
+    return () => {
+      removeEventListener("keydown", close);
+      document.body.classList.remove("lightbox-open");
+    };
+  }, [open]);
+  return (
+    <>
+      <button
+        type="button"
+        className={`zoomable-image${compact ? " compact" : ""}`}
+        aria-label={`${alt} — enlarge`}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(true);
+        }}
+      >
+        <img src={src} alt={alt} />
+        <span aria-hidden="true">↗</span>
+      </button>
+      {open && (
+        <div
+          className="image-lightbox"
+          role="dialog"
+          aria-modal="true"
+          aria-label={alt}
+          onClick={() => setOpen(false)}
+        >
+          <button
+            type="button"
+            className="lightbox-close"
+            aria-label="Close"
+            onClick={() => setOpen(false)}
+          >
+            <X />
+          </button>
+          <img
+            src={src}
+            alt={alt}
+            onClick={(event) => event.stopPropagation()}
+          />
+        </div>
+      )}
+    </>
+  );
+}
 function ExerciseCard({
   ex,
   save,
@@ -494,7 +557,7 @@ function ExerciseCard({
   }, [ex.id]);
   return (
     <div className="exercise-card">
-      <img
+      <ZoomableImage
         src={ex.exercise.images[0]?.path || "/icon.svg"}
         alt={ex.exercise.nameEn}
       />
@@ -878,7 +941,11 @@ function Admin({ logout }: { logout: () => void }) {
       {items.map((e) => (
         <details className="admin" key={e.id}>
           <summary>
-            <img src={e.images[0]?.path} />
+            <ZoomableImage
+              src={e.images[0]?.path || "/icon.svg"}
+              alt={localizedName(e)}
+              compact
+            />
             <div>
               <b>{localizedName(e)}</b>
               <span>

@@ -141,7 +141,7 @@ const exercises = [
   maxReps: x[7],
   defaultRestSeconds: x[8],
   defaultIncrement: x[9],
-  images: [{ path: `/exercise-images/${x[0]}.jpg` }],
+  images: [{ path: `/exercise-images/${x[0]}.webp` }],
   machines: [],
 }));
 type State = { sessions: any[]; weights: any[] };
