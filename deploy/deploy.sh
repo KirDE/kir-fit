@@ -15,4 +15,15 @@ docker compose up -d db
 docker compose run --rm seed
 docker compose up -d app
 docker compose ps
-curl --fail --retry 12 --retry-delay 3 --retry-all-errors http://127.0.0.1:3210/api/health
+healthy=0
+for attempt in $(seq 1 30); do
+  if curl --fail --silent --show-error http://127.0.0.1:3210/api/health; then
+    healthy=1
+    break
+  fi
+  sleep 2
+done
+if [ "$healthy" -ne 1 ]; then
+  docker compose logs --tail 100 app
+  exit 1
+fi
