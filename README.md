@@ -39,7 +39,7 @@ Production uses `/opt/kir-fit/repo`, a root-owned `.env`, Docker Compose, and a 
 
 - Every session and set mutation has a client UUID, making retries idempotent.
 - The active session is restored on reload.
-- Failed set writes are queued locally and synchronized after reconnect.
+- Failed set writes are queued locally and synchronized after reconnect. Authenticated API responses are never placed in the shared service-worker cache.
 - Set completion is disabled after the planned count; server uniqueness constraints prevent duplicates.
 - Undo removes only the most recent active-workout set.
 - User-uploaded images are limited to JPEG/PNG/WebP and 5 MB.
@@ -47,4 +47,4 @@ Production uses `/opt/kir-fit/repo`, a root-owned `.env`, Docker Compose, and a 
 
 ## PWA installation
 
-On Android Chrome, open the HTTPS site and choose **Install app**. The application has a standalone manifest and offline shell. API read caches use Network First; active write mutations additionally use the local retry queue.
+On Android Chrome, open the HTTPS site and choose **Install app**. The application has a standalone manifest and offline shell. Authenticated API calls remain network-only; active write mutations use the local retry queue without exposing one account's data through a shared cache.
