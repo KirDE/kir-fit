@@ -22,6 +22,16 @@ const germanCopy: Record<string,[string,string]> = {
   'triceps-pushdown':['Kabelstation, an der Stange oder Seil durch Strecken der Ellbogen nach unten gedrückt werden.','Ellbogen am Oberkörper fixieren und nur die Unterarme bewegen.'],
   'biceps-curl':['Maschine oder Kabelstation, an der die Unterarme zu den Schultern gebeugt werden.','Oberarme ruhig halten und das Gewicht kontrolliert absenken.']
 };
+const russianCopy: Record<string,[string,string]> = {
+  'leg-press':['Сидячий тренажёр с платформой, которую нужно отталкивать обеими ногами.','Прижмите спину к опоре, направляйте колени по линии носков и не разгибайте их до блокировки.'],
+  'chest-press':['Сидячий тренажёр, в котором ручки на уровне груди выжимаются вперёд.','Настройте сиденье так, чтобы ручки были на уровне середины груди. Сведите лопатки и опускайте вес медленно.'],
+  'lat-pulldown':['Блочный тренажёр с верхней перекладиной, которую тянут к верхней части груди.','Слегка отклонитесь назад, тяните локти вниз и не раскачивайтесь.'],
+  'seated-row':['Сидячий блочный или рычажный тренажёр, ручки которого тянут к корпусу.','Держите корпус неподвижно и сводите лопатки, не поднимая плечи.'],
+  'leg-curl':['Сидячий или лежачий тренажёр, где ноги сгибаются в коленях против мягкого валика.','Совместите колени с осью вращения и контролируйте обратное движение.'],
+  'shoulder-press':['Сидячий тренажёр, в котором ручки выжимаются вверх от уровня плеч.','Не прогибайте поясницу и не блокируйте локти.'],
+  'triceps-pushdown':['Блочный тренажёр, где рукоять или канат опускаются вниз разгибанием локтей.','Зафиксируйте локти у корпуса и двигайте только предплечьями.'],
+  'biceps-curl':['Тренажёр или блок, в котором предплечья сгибаются по направлению к плечам.','Не двигайте плечами и опускайте вес подконтрольно.']
+};
 
 async function main() {
   const username = process.env.APP_USERNAME || 'kirill';
@@ -31,7 +41,8 @@ async function main() {
   for (let i=0;i<exercises.length;i++) {
     const [id,nameEn,nameDe,nameRu,description,instructions,targetMuscles,equipmentType,exerciseType,defaultSets,minReps,maxReps,defaultRestSeconds,defaultIncrement]=exercises[i];
     const [descriptionDe,instructionsDe]=germanCopy[id];
-    const data={nameEn,nameDe,nameRu,description,descriptionDe,instructions,instructionsDe,targetMuscles:[...targetMuscles],equipmentType,exerciseType,defaultSets,minReps,maxReps,defaultRestSeconds,defaultIncrement:new Prisma.Decimal(defaultIncrement)};
+    const [descriptionRu,instructionsRu]=russianCopy[id];
+    const data={nameEn,nameDe,nameRu,description,descriptionDe,descriptionRu,instructions,instructionsDe,instructionsRu,targetMuscles:[...targetMuscles],equipmentType,exerciseType,defaultSets,minReps,maxReps,defaultRestSeconds,defaultIncrement:new Prisma.Decimal(defaultIncrement)};
     await prisma.exercise.upsert({where:{id},update:data,create:{id,...data}});
     const image=await prisma.exerciseImage.findFirst({where:{exerciseId:id,isPrimary:true}});
     if(image)await prisma.exerciseImage.update({where:{id:image.id},data:{path:`/exercise-images/${id}.jpg`,caption:`${nameEn} / ${nameDe}`}});

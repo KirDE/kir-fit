@@ -30,8 +30,10 @@ model Exercise {
   nameRu String?
   description String
   descriptionDe String?
+  descriptionRu String?
   instructions String
   instructionsDe String?
+  instructionsRu String?
   targetMuscles String[]
   equipmentType String
   exerciseType String

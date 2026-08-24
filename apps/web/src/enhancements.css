@@ -2,4 +2,4 @@
 .google-login{min-height:44px;display:grid;place-items:center}
 .guest-button,.signout,.language-switch button{width:100%;min-height:50px;border:1px solid var(--line);border-radius:13px;background:var(--panel);color:var(--text);font-weight:800;margin-top:12px}
 .legacy-login{margin-top:24px;color:var(--muted)}.legacy-login summary{text-align:center}.legacy-login form{margin-top:18px}
-.language-switch{display:grid;grid-template-columns:1fr 1fr;gap:8px}.language-switch button{margin:0}.language-switch button.selected{background:var(--accent);color:var(--accentText);border-color:var(--accent)}
+.language-switch{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.language-switch button{margin:0}.language-switch button.selected{background:var(--accent);color:var(--accentText);border-color:var(--accent)}
