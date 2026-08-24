@@ -21,6 +21,7 @@ jobs:
         with: {node-version: 22, cache: npm}
       - run: npm ci
       - run: npm exec -w @kir-fit/api -- prisma validate --schema prisma/schema.prisma
+      - run: npm exec -w @kir-fit/api -- prisma generate --schema prisma/schema.prisma
       - run: npm run lint
       - run: npm test
       - run: npm run build
