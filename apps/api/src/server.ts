@@ -20,7 +20,15 @@ const secret = process.env.JWT_SECRET;
 if (!secret || secret.length < 32)
   throw new Error("JWT_SECRET must be at least 32 characters");
 app.set("trust proxy", 1);
-app.use(helmet({ contentSecurityPolicy: false }));
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    // Google Identity Services returns the OAuth token to its opener. The
+    // default `same-origin` policy severs that relationship for the Google
+    // popup, leaving the login page waiting forever after account selection.
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+  }),
+);
 app.use(
   cors({ origin: process.env.ORIGIN?.split(",") || false, credentials: true }),
 );
