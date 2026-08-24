@@ -197,7 +197,19 @@ const ru: typeof en = {
 const messages = { en, de, ru };
 export const getLanguage = (): Language => {
   const v = localStorage.getItem("kirfit_language");
-  return v === "de" || v === "ru" ? v : "en";
+  if (v === "de" || v === "ru" || v === "en") return v;
+  const browserLanguages =
+    typeof navigator === "undefined"
+      ? []
+      : navigator.languages?.length
+        ? navigator.languages
+        : [navigator.language];
+  for (const language of browserLanguages) {
+    const primary = language?.toLowerCase().split("-")[0];
+    if (primary === "de" || primary === "ru" || primary === "en")
+      return primary;
+  }
+  return "en";
 };
 export const setLanguage = (v: Language) =>
   localStorage.setItem("kirfit_language", v);
