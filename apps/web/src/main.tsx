@@ -38,9 +38,9 @@ const dayNames = [
   "Friday",
   "Saturday",
 ];
-const localizedDayNames = () => {
+const localizedWeekdays = () => {
   const lang = getLanguage();
-  return lang === "de"
+  const names = lang === "de"
     ? [
         "Sonntag",
         "Montag",
@@ -61,6 +61,18 @@ const localizedDayNames = () => {
           "Суббота",
         ]
       : dayNames;
+  const abbreviations =
+    lang === "ru"
+      ? ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"]
+      : lang === "de"
+        ? ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"]
+        : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  return [1, 2, 3, 4, 5, 6, 0].map((value) => ({
+    value,
+    name: names[value],
+    abbreviation: abbreviations[value],
+  }));
 };
 const localizedName = (e: Exercise) =>
   getLanguage() === "ru"
@@ -346,7 +358,9 @@ function Dashboard({
   if (!d) return <Loading />;
   const next = new Date(d.nextWorkout),
     lang = getLanguage(),
-    days = localizedDayNames();
+    nextDay = localizedWeekdays().find(
+      (day) => day.value === next.getDay(),
+    )!.name;
   return (
     <section>
       <Header title="Kir Fit" />
@@ -355,7 +369,7 @@ function Dashboard({
       </div>
       <div className="hero">
         <p className="eyebrow">{tr("nextWorkout")}</p>
-        <h1>{days[next.getDay()]}</h1>
+        <h1>{nextDay}</h1>
         <p>
           {d.template?.name || "Full Body"} · 8{" "}
           {lang === "ru" ? "упражнений" : tr("exercises").toLowerCase()}
@@ -1001,24 +1015,24 @@ function Admin({ logout }: { logout: () => void }) {
         {weekdays && (
           <>
             <div className="weekday-picker">
-              {localizedDayNames().map((day, index) => (
+              {localizedWeekdays().map((day) => (
                 <button
                   type="button"
-                  key={day}
-                  className={weekdays.includes(index) ? "selected" : ""}
-                  aria-label={day}
+                  key={day.value}
+                  className={weekdays.includes(day.value) ? "selected" : ""}
+                  aria-label={day.name}
                   onClick={() => {
                     setDaysSaved(false);
                     setWeekdays((current) =>
-                      current!.includes(index)
+                      current!.includes(day.value)
                         ? current!.length === 1
                           ? current
-                          : current!.filter((x) => x !== index)
-                        : [...current!, index],
+                          : current!.filter((x) => x !== day.value)
+                        : [...current!, day.value],
                     );
                   }}
                 >
-                  {day.slice(0, 2)}
+                  {day.abbreviation}
                 </button>
               ))}
             </div>
