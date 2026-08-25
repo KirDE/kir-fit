@@ -38,6 +38,30 @@ const dayNames = [
   "Friday",
   "Saturday",
 ];
+const localizedDayNames = () => {
+  const lang = getLanguage();
+  return lang === "de"
+    ? [
+        "Sonntag",
+        "Montag",
+        "Dienstag",
+        "Mittwoch",
+        "Donnerstag",
+        "Freitag",
+        "Samstag",
+      ]
+    : lang === "ru"
+      ? [
+          "Воскресенье",
+          "Понедельник",
+          "Вторник",
+          "Среда",
+          "Четверг",
+          "Пятница",
+          "Суббота",
+        ]
+      : dayNames;
+};
 const localizedName = (e: Exercise) =>
   getLanguage() === "ru"
     ? e.nameRu || e.nameEn
@@ -322,28 +346,7 @@ function Dashboard({
   if (!d) return <Loading />;
   const next = new Date(d.nextWorkout),
     lang = getLanguage(),
-    days =
-      lang === "de"
-        ? [
-            "Sonntag",
-            "Montag",
-            "Dienstag",
-            "Mittwoch",
-            "Donnerstag",
-            "Freitag",
-            "Samstag",
-          ]
-        : lang === "ru"
-          ? [
-              "Воскресенье",
-              "Понедельник",
-              "Вторник",
-              "Среда",
-              "Четверг",
-              "Пятница",
-              "Суббота",
-            ]
-          : dayNames;
+    days = localizedDayNames();
   return (
     <section>
       <Header title="Kir Fit" />
@@ -363,9 +366,12 @@ function Dashboard({
       </div>
       <div className="grid">
         <Card title={tr("bodyWeight")} onClick={weight}>
-          <strong>{d.currentWeight ?? "—"} kg</strong>
+          <strong>
+            {d.currentWeight ?? "—"} {tr("kg")}
+          </strong>
           <span className={d.weightChange <= 0 ? "good" : ""}>
-            {d.weightChange?.toFixed(1)} kg {tr("fromStart")}
+            {d.weightChange == null ? "—" : d.weightChange.toFixed(1)}{" "}
+            {tr("kg")} {tr("fromStart")}
           </span>
         </Card>
         <Card title={tr("lastWorkout")}>
@@ -375,7 +381,7 @@ function Dashboard({
                 {d.last.setCount} {tr("sets").toLowerCase()}
               </strong>
               <span>
-                {d.last.volume.toLocaleString()} kg {tr("volume")} ·{" "}
+                {d.last.volume.toLocaleString()} {tr("kg")} {tr("volume")} ·{" "}
                 {d.last.durationMinutes} min
               </span>
             </>
@@ -606,13 +612,13 @@ function ExerciseCard({
   save: (v: any) => void;
 }) {
   const last: any = null;
-  const [weight, setWeight] = useState(
-      last?.weight || ex.sets.at(-1)?.weight || 0,
+  const [weight, setWeight] = useState<number | "">(
+      last?.weight || ex.sets.at(-1)?.weight || "",
     ),
     [reps, setReps] = useState(ex.minReps),
     [rir, setRir] = useState<number | null>(null);
   useEffect(() => {
-    setWeight(ex.sets.at(-1)?.weight || 0);
+    setWeight(ex.sets.at(-1)?.weight || "");
     setReps(ex.minReps);
   }, [ex.id]);
   return (
@@ -649,7 +655,7 @@ function ExerciseCard({
         <div className="completed-sets">
           {ex.sets.map((s) => (
             <span key={s.id}>
-              ✓ {s.weight} kg × {s.reps}
+              ✓ {s.weight} {tr("kg")} × {s.reps}
               {s.rir !== null ? ` · RIR ${s.rir}` : ""}
             </span>
           ))}
@@ -661,7 +667,7 @@ function ExerciseCard({
           value={weight}
           set={setWeight}
           step={ex.exercise.defaultIncrement || 2.5}
-          suffix="kg"
+          suffix={tr("kg")}
         />
         <NumberStep label={tr("reps")} value={reps} set={setReps} step={1} />
       </div>
@@ -682,7 +688,12 @@ function ExerciseCard({
       {ex.suggestIncrease && <div className="tip">{tr("increaseTip")}</div>}
       <button
         className="primary big complete"
-        disabled={ex.sets.length >= ex.plannedSets || weight < 0 || reps < 1}
+        disabled={
+          ex.sets.length >= ex.plannedSets ||
+          weight === "" ||
+          weight < 0 ||
+          reps < 1
+        }
         onClick={() => save({ weight, reps, rir })}
       >
         {tr("completeSet")}
@@ -698,8 +709,8 @@ function NumberStep({
   suffix,
 }: {
   label: string;
-  value: number;
-  set: (v: number) => void;
+  value: number | "";
+  set: (v: any) => void;
   step: number;
   suffix?: string;
 }) {
@@ -707,17 +718,25 @@ function NumberStep({
     <label className="number">
       <span>{label}</span>
       <div>
-        <button onClick={() => set(Math.max(0, +(value - step).toFixed(2)))}>
+        <button
+          onClick={() =>
+            set(Math.max(0, +(Number(value || 0) - step).toFixed(2)))
+          }
+        >
           −
         </button>
         <input
           inputMode="decimal"
           type="number"
           value={value}
-          onChange={(e) => set(Number(e.target.value))}
+          onChange={(e) =>
+            set(e.target.value === "" ? "" : Number(e.target.value))
+          }
         />
         {suffix && <b>{suffix}</b>}
-        <button onClick={() => set(+(value + step).toFixed(2))}>+</button>
+        <button onClick={() => set(+(Number(value || 0) + step).toFixed(2))}>
+          +
+        </button>
       </div>
     </label>
   );
@@ -768,7 +787,7 @@ function History() {
                 </span>
               </div>
               <strong>
-                {Math.round(s.summary.volume).toLocaleString()} kg
+                {Math.round(s.summary.volume).toLocaleString()} {tr("kg")}
               </strong>
             </summary>
             {s.exercises
@@ -815,20 +834,30 @@ function Progress() {
         <>
           <div className="grid">
             <Card title={tr("workingWeight")}>
-              <strong>{data.history.at(-1)?.weight || "—"} kg</strong>
+              <strong>
+                {data.history.at(-1)?.weight || "—"} {tr("kg")}
+              </strong>
             </Card>
             <Card title={tr("bestWeight")}>
               <strong>
                 {Math.max(0, ...data.history.map((x: any) => x.weight)) || "—"}{" "}
-                kg
+                {tr("kg")}
               </strong>
             </Card>
           </div>
           <Card title={tr("workingWeight")}>
-            <Chart data={data.history} dataKey="weight" suffix=" kg" />
+            <Chart
+              data={data.history}
+              dataKey="weight"
+              suffix={` ${tr("kg")}`}
+            />
           </Card>
           <Card title={tr("trainingVolume")}>
-            <Chart data={data.history} dataKey="volume" suffix=" kg" />
+            <Chart
+              data={data.history}
+              dataKey="volume"
+              suffix={` ${tr("kg")}`}
+            />
           </Card>
         </>
       )}
@@ -878,7 +907,7 @@ function Chart({
 }
 function BodyWeight() {
   const [rows, setRows] = useState<any[]>(),
-    [weight, setWeight] = useState(94.9),
+    [weight, setWeight] = useState<number | "">(""),
     [notes, setNotes] = useState("");
   const load = () => api("/body-weight").then(setRows);
   useEffect(() => {
@@ -903,14 +932,16 @@ function BodyWeight() {
       <Header title={tr("bodyWeight")} />
       <div className="hero compact">
         <p className="eyebrow">{tr("current")}</p>
-        <h1>{rows.at(-1)?.weight || "—"} kg</h1>
+        <h1>
+          {rows.at(-1)?.weight || "—"} {tr("kg")}
+        </h1>
         <p>
           {weekly > 0 ? "+" : ""}
-          {weekly.toFixed(2)} {tr("average")}
+          {weekly.toFixed(2)} {tr("kg")} {tr("average")}
         </p>
       </div>
       <Card title={tr("weightTrend")}>
-        <Chart data={rows} dataKey="weight" suffix=" kg" />
+        <Chart data={rows} dataKey="weight" suffix={` ${tr("kg")}`} />
       </Card>
       <Card title={tr("addEntry")}>
         <NumberStep
@@ -918,7 +949,7 @@ function BodyWeight() {
           value={weight}
           set={setWeight}
           step={0.1}
-          suffix="kg"
+          suffix={tr("kg")}
         />
         <label>
           {tr("note")}
@@ -930,6 +961,7 @@ function BodyWeight() {
         </label>
         <button
           className="primary"
+          disabled={weight === "" || weight <= 0}
           onClick={async () => {
             await api("/body-weight", {
               method: "POST",
@@ -950,10 +982,13 @@ function BodyWeight() {
   );
 }
 function Admin({ logout }: { logout: () => void }) {
-  const [items, setItems] = useState<Exercise[]>();
+  const [items, setItems] = useState<Exercise[]>(),
+    [weekdays, setWeekdays] = useState<number[]>(),
+    [daysSaved, setDaysSaved] = useState(false);
   const load = () => api("/exercises").then(setItems);
   useEffect(() => {
     load();
+    api("/settings/program").then((x) => setWeekdays(x.preferredWeekdays));
   }, []);
   if (!items) return <Loading />;
   return (
@@ -961,6 +996,47 @@ function Admin({ logout }: { logout: () => void }) {
       <Header title={tr("settings")} subtitle={tr("programSettings")} />
       <Card title={tr("language")}>
         <LanguageSwitcher />
+      </Card>
+      <Card title={tr("trainingDays")}>
+        {weekdays && (
+          <>
+            <div className="weekday-picker">
+              {localizedDayNames().map((day, index) => (
+                <button
+                  type="button"
+                  key={day}
+                  className={weekdays.includes(index) ? "selected" : ""}
+                  aria-label={day}
+                  onClick={() => {
+                    setDaysSaved(false);
+                    setWeekdays((current) =>
+                      current!.includes(index)
+                        ? current!.length === 1
+                          ? current
+                          : current!.filter((x) => x !== index)
+                        : [...current!, index],
+                    );
+                  }}
+                >
+                  {day.slice(0, 2)}
+                </button>
+              ))}
+            </div>
+            <button
+              className="primary"
+              onClick={async () => {
+                const result = await api("/settings/program", {
+                  method: "PATCH",
+                  body: JSON.stringify({ preferredWeekdays: weekdays }),
+                });
+                setWeekdays(result.preferredWeekdays);
+                setDaysSaved(true);
+              }}
+            >
+              {daysSaved ? tr("saved") : tr("saveTrainingDays")}
+            </button>
+          </>
+        )}
       </Card>
       <Card title={tr("account")}>
         <strong>{isGuest() ? tr("guest") : "Google / Kir Fit"}</strong>

@@ -36,6 +36,16 @@ describe("guest persistence", () => {
     });
     expect(values.get("kirfit_guest_data_v1")).toContain('"weight":40');
   });
+  it("starts without invented body weight and persists chosen training days", async () => {
+    expect(await guestApi("/body-weight")).toEqual([]);
+    await guestApi("/settings/program", {
+      method: "PATCH",
+      body: JSON.stringify({ preferredWeekdays: [2, 4] }),
+    });
+    expect(await guestApi("/settings/program")).toEqual({
+      preferredWeekdays: [2, 4],
+    });
+  });
   it("provides Russian interface messages", () => {
     localStorage.setItem("kirfit_language", "ru");
     expect(tr("startWorkout")).toBe("Начать тренировку");

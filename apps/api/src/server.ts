@@ -186,6 +186,41 @@ app.get(
 );
 
 app.get(
+  "/api/settings/program",
+  auth,
+  asyncRoute(async (req, res) => {
+    const program = await prisma.workoutProgram.findFirstOrThrow({
+      where: { userId: userId(req), active: true },
+    });
+    res.json({ preferredWeekdays: program.preferredWeekdays });
+  }),
+);
+
+app.patch(
+  "/api/settings/program",
+  auth,
+  asyncRoute(async (req, res) => {
+    const body = z
+      .object({
+        preferredWeekdays: z
+          .array(z.number().int().min(0).max(6))
+          .min(1)
+          .max(7)
+          .refine((days) => new Set(days).size === days.length),
+      })
+      .parse(req.body);
+    const program = await prisma.workoutProgram.findFirstOrThrow({
+      where: { userId: userId(req), active: true },
+    });
+    const updated = await prisma.workoutProgram.update({
+      where: { id: program.id },
+      data: { preferredWeekdays: body.preferredWeekdays },
+    });
+    res.json({ preferredWeekdays: updated.preferredWeekdays });
+  }),
+);
+
+app.get(
   "/api/workouts/active",
   auth,
   asyncRoute(async (req, res) => {

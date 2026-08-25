@@ -213,8 +213,6 @@ async function main() {
       username,
       passwordHash: await bcrypt.hash(password, 12),
       displayName: "Kirill",
-      heightCm: 176,
-      startingWeightKg: new Prisma.Decimal(99),
     },
   });
   for (let i = 0; i < exercises.length; i++) {
@@ -319,17 +317,10 @@ async function main() {
       },
     });
   }
-  const date = new Date();
-  date.setUTCHours(12, 0, 0, 0);
-  await prisma.bodyWeightEntry.upsert({
-    where: { userId_date: { userId: user.id, date } },
-    update: { weight: new Prisma.Decimal(94.9) },
-    create: {
-      userId: user.id,
-      date,
-      weight: new Prisma.Decimal(94.9),
-      notes: "Initial entry",
-    },
+  // Remove the former demo value. Real measurements must only be created by
+  // the user; deployments and seeds must never invent health data.
+  await prisma.bodyWeightEntry.deleteMany({
+    where: { userId: user.id, notes: "Initial entry" },
   });
 }
 main().finally(() => prisma.$disconnect());

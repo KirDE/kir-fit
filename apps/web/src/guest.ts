@@ -144,21 +144,25 @@ const exercises = [
   images: [{ path: `/exercise-images/${x[0]}.webp` }],
   machines: [],
 }));
-type State = { sessions: any[]; weights: any[] };
+type State = {
+  sessions: any[];
+  weights: any[];
+  preferredWeekdays: number[];
+};
 const fresh = (): State => ({
   sessions: [],
-  weights: [
-    {
-      id: "initial",
-      date: new Date().toISOString(),
-      weight: 94.9,
-      notes: "Initial entry",
-    },
-  ],
+  weights: [],
+  preferredWeekdays: [0, 3, 5],
 });
 const load = (): State => {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE) || "") || fresh();
+    const stored = JSON.parse(localStorage.getItem(STORAGE) || "");
+    if (!stored) return fresh();
+    stored.weights = (stored.weights || []).filter(
+      (x: any) => x.id !== "initial",
+    );
+    stored.preferredWeekdays ||= [0, 3, 5];
+    return stored;
   } catch {
     return fresh();
   }
@@ -200,11 +204,11 @@ export async function guestApi(path: string, init: RequestInit = {}) {
     const last = state.sessions.filter((s) => s.status === "completed").at(-1);
     const current = state.weights.at(-1)?.weight;
     return {
-      nextWorkout: nextDay(),
+      nextWorkout: nextDay(state.preferredWeekdays),
       template: { id: "guest-full-body", name: "Full Body" },
       last: last ? summary(last) : null,
       currentWeight: current,
-      weightChange: current == null ? null : current - 99,
+      weightChange: null,
       achievements: [],
     };
   }
@@ -330,13 +334,23 @@ export async function guestApi(path: string, init: RequestInit = {}) {
     save(state);
     return row;
   }
+  if (path === "/settings/program" && method === "GET")
+    return { preferredWeekdays: [...state.preferredWeekdays] };
+  if (path === "/settings/program" && method === "PATCH") {
+    const days = body(init).preferredWeekdays;
+    if (!Array.isArray(days) || !days.length)
+      throw new Error("Select at least one training day");
+    state.preferredWeekdays = [...new Set(days)].sort((a, b) => a - b);
+    save(state);
+    return { preferredWeekdays: [...state.preferredWeekdays] };
+  }
   if (path.match(/^\/exercises\//) && method === "PATCH") return {};
   throw new Error(`Unsupported guest operation: ${method} ${path}`);
 }
-function nextDay() {
+function nextDay(preferredWeekdays: number[]) {
   const d = new Date();
   for (let i = 0; i < 8; i++) {
-    if ([0, 3, 5].includes(d.getDay()) && i > 0) return d.toISOString();
+    if (preferredWeekdays.includes(d.getDay())) return d.toISOString();
     d.setDate(d.getDate() + 1);
   }
   return d.toISOString();
