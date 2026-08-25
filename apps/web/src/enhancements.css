@@ -16,6 +16,9 @@
   justify-content: space-between;
   gap: 12px;
 }
+.login {
+  padding-bottom: 90px;
+}
 .google-login {
   width: 100%;
   min-height: 58px;
@@ -45,10 +48,12 @@
 .google-login:disabled {
   opacity: 0.5;
 }
-.home-language {
-  display: flex;
-  justify-content: flex-end;
-  margin: -72px 58px 25px 0;
+.login-language-bottom {
+  position: fixed;
+  z-index: 10;
+  left: 50%;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
 }
 .guest-button,
 .signout,

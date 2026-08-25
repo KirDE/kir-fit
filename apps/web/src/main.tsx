@@ -275,7 +275,6 @@ function Login({ done }: { done: () => void }) {
           <Dumbbell />
           <b>Kir Fit</b>
         </div>
-        <LanguageSwitcher compact />
       </div>
       <h1>{tr("signGoogle")}</h1>
       <button
@@ -341,6 +340,9 @@ function Login({ done }: { done: () => void }) {
           <button className="primary">{tr("signIn")}</button>
         </form>
       </details>
+      <div className="login-language-bottom">
+        <LanguageSwitcher compact />
+      </div>
     </div>
   );
 }
@@ -364,9 +366,6 @@ function Dashboard({
   return (
     <section>
       <Header title="Kir Fit" />
-      <div className="home-language">
-        <LanguageSwitcher compact />
-      </div>
       <div className="hero">
         <p className="eyebrow">{tr("nextWorkout")}</p>
         <h1>{nextDay}</h1>
