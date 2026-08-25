@@ -4,173 +4,194 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url = env("DATABASE_URL")
+  url      = env("DATABASE_URL")
 }
 
 model User {
-  id String @id @default(cuid())
-  username String @unique
-  passwordHash String?
-  email String? @unique
-  googleSub String? @unique
-  displayName String
-  heightCm Int?
-  startingWeightKg Decimal? @db.Decimal(6,2)
-  createdAt DateTime @default(now())
-  programs WorkoutProgram[]
-  sessions WorkoutSession[]
-  bodyWeights BodyWeightEntry[]
-  machines Machine[]
+  id               String            @id @default(cuid())
+  username         String            @unique
+  passwordHash     String?
+  email            String?           @unique
+  googleSub        String?           @unique
+  displayName      String
+  heightCm         Int?
+  startingWeightKg Decimal?          @db.Decimal(6, 2)
+  createdAt        DateTime          @default(now())
+  programs         WorkoutProgram[]
+  sessions         WorkoutSession[]
+  bodyWeights      BodyWeightEntry[]
+  machines         Machine[]
+  authenticators   Authenticator[]
+  currentChallenge String?
 }
 
 model Exercise {
-  id String @id
-  nameEn String
-  nameDe String
-  nameRu String?
-  description String
-  descriptionDe String?
-  descriptionRu String?
-  instructions String
-  instructionsDe String?
-  instructionsRu String?
-  targetMuscles String[]
-  equipmentType String
-  exerciseType String
-  defaultSets Int
-  minReps Int
-  maxReps Int
+  id                 String                    @id
+  nameEn             String
+  nameDe             String
+  nameRu             String?
+  description        String
+  descriptionDe      String?
+  descriptionRu      String?
+  instructions       String
+  instructionsDe     String?
+  instructionsRu     String?
+  targetMuscles      String[]
+  equipmentType      String
+  exerciseType       String
+  defaultSets        Int
+  minReps            Int
+  maxReps            Int
   defaultRestSeconds Int
-  defaultIncrement Decimal @db.Decimal(6,2)
-  userNotes String?
-  archived Boolean @default(false)
-  images ExerciseImage[]
-  templateExercises WorkoutTemplateExercise[]
-  workoutExercises WorkoutExercise[]
-  machines Machine[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  defaultIncrement   Decimal                   @db.Decimal(6, 2)
+  userNotes          String?
+  archived           Boolean                   @default(false)
+  images             ExerciseImage[]
+  templateExercises  WorkoutTemplateExercise[]
+  workoutExercises   WorkoutExercise[]
+  machines           Machine[]
+  authenticators     Authenticator[]
+  currentChallenge   String?
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
 }
 
 model ExerciseImage {
-  id String @id @default(cuid())
+  id         String   @id @default(cuid())
   exerciseId String
-  exercise Exercise @relation(fields:[exerciseId], references:[id], onDelete:Cascade)
-  path String
-  caption String?
-  sortOrder Int @default(0)
-  isPrimary Boolean @default(false)
+  exercise   Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  path       String
+  caption    String?
+  sortOrder  Int      @default(0)
+  isPrimary  Boolean  @default(false)
 }
 
 model WorkoutProgram {
-  id String @id @default(cuid())
-  userId String
-  user User @relation(fields:[userId], references:[id])
-  name String
-  active Boolean @default(false)
+  id                String            @id @default(cuid())
+  userId            String
+  user              User              @relation(fields: [userId], references: [id])
+  name              String
+  active            Boolean           @default(false)
   preferredWeekdays Int[]
-  templates WorkoutTemplate[]
-  createdAt DateTime @default(now())
+  templates         WorkoutTemplate[]
+  createdAt         DateTime          @default(now())
 }
 
 model WorkoutTemplate {
-  id String @id @default(cuid())
+  id        String                    @id @default(cuid())
   programId String
-  program WorkoutProgram @relation(fields:[programId], references:[id], onDelete:Cascade)
-  name String
+  program   WorkoutProgram            @relation(fields: [programId], references: [id], onDelete: Cascade)
+  name      String
   exercises WorkoutTemplateExercise[]
-  sessions WorkoutSession[]
+  sessions  WorkoutSession[]
 }
 
 model WorkoutTemplateExercise {
-  id String @id @default(cuid())
-  templateId String
-  template WorkoutTemplate @relation(fields:[templateId], references:[id], onDelete:Cascade)
-  exerciseId String
-  exercise Exercise @relation(fields:[exerciseId], references:[id])
-  sortOrder Int
-  sets Int
-  minReps Int
-  maxReps Int
+  id          String          @id @default(cuid())
+  templateId  String
+  template    WorkoutTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  exerciseId  String
+  exercise    Exercise        @relation(fields: [exerciseId], references: [id])
+  sortOrder   Int
+  sets        Int
+  minReps     Int
+  maxReps     Int
   restSeconds Int
-  increment Decimal @db.Decimal(6,2)
+  increment   Decimal         @db.Decimal(6, 2)
+
   @@unique([templateId, exerciseId])
 }
 
 model Machine {
-  id String @id @default(cuid())
-  userId String
-  user User @relation(fields:[userId], references:[id])
-  exerciseId String
-  exercise Exercise @relation(fields:[exerciseId], references:[id])
-  name String
-  gym String?
-  manufacturer String?
-  model String?
-  machineNumber String?
+  id               String            @id @default(cuid())
+  userId           String
+  user             User              @relation(fields: [userId], references: [id])
+  exerciseId       String
+  exercise         Exercise          @relation(fields: [exerciseId], references: [id])
+  name             String
+  gym              String?
+  manufacturer     String?
+  model            String?
+  machineNumber    String?
   availableWeights Decimal[]
-  weightIncrement Decimal? @db.Decimal(6,2)
-  seatSetting String?
-  backrestSetting String?
-  notes String?
-  images String[]
-  archived Boolean @default(false)
+  weightIncrement  Decimal?          @db.Decimal(6, 2)
+  seatSetting      String?
+  backrestSetting  String?
+  notes            String?
+  images           String[]
+  archived         Boolean           @default(false)
   workoutExercises WorkoutExercise[]
 }
 
 model WorkoutSession {
-  id String @id @default(cuid())
-  userId String
-  user User @relation(fields:[userId], references:[id])
-  templateId String
-  template WorkoutTemplate @relation(fields:[templateId], references:[id])
-  startedAt DateTime @default(now())
-  finishedAt DateTime?
-  notes String?
-  status String @default("active")
-  clientMutationId String @unique
-  exercises WorkoutExercise[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id               String            @id @default(cuid())
+  userId           String
+  user             User              @relation(fields: [userId], references: [id])
+  templateId       String
+  template         WorkoutTemplate   @relation(fields: [templateId], references: [id])
+  startedAt        DateTime          @default(now())
+  finishedAt       DateTime?
+  notes            String?
+  status           String            @default("active")
+  clientMutationId String            @unique
+  exercises        WorkoutExercise[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 }
 
 model WorkoutExercise {
-  id String @id @default(cuid())
-  sessionId String
-  session WorkoutSession @relation(fields:[sessionId], references:[id], onDelete:Cascade)
-  exerciseId String
-  exercise Exercise @relation(fields:[exerciseId], references:[id])
-  machineId String?
-  machine Machine? @relation(fields:[machineId], references:[id])
-  sortOrder Int
-  plannedSets Int
-  minReps Int
-  maxReps Int
-  restSeconds Int
-  exerciseNameSnapshot String
+  id                      String         @id @default(cuid())
+  sessionId               String
+  session                 WorkoutSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  exerciseId              String
+  exercise                Exercise       @relation(fields: [exerciseId], references: [id])
+  machineId               String?
+  machine                 Machine?       @relation(fields: [machineId], references: [id])
+  sortOrder               Int
+  plannedSets             Int
+  minReps                 Int
+  maxReps                 Int
+  restSeconds             Int
+  exerciseNameSnapshot    String
   machineSettingsSnapshot Json?
-  sets WorkoutSet[]
+  sets                    WorkoutSet[]
 }
 
 model WorkoutSet {
-  id String @id @default(cuid())
+  id                String          @id @default(cuid())
   workoutExerciseId String
-  workoutExercise WorkoutExercise @relation(fields:[workoutExerciseId], references:[id], onDelete:Cascade)
-  setNumber Int
-  weight Decimal @db.Decimal(6,2)
-  reps Int
-  rir Int?
-  completedAt DateTime @default(now())
-  clientMutationId String @unique
-  @@unique([workoutExerciseId,setNumber])
+  workoutExercise   WorkoutExercise @relation(fields: [workoutExerciseId], references: [id], onDelete: Cascade)
+  setNumber         Int
+  weight            Decimal         @db.Decimal(6, 2)
+  reps              Int
+  rir               Int?
+  completedAt       DateTime        @default(now())
+  clientMutationId  String          @unique
+
+  @@unique([workoutExerciseId, setNumber])
 }
 
 model BodyWeightEntry {
-  id String @id @default(cuid())
+  id     String   @id @default(cuid())
   userId String
-  user User @relation(fields:[userId], references:[id])
-  date DateTime
-  weight Decimal @db.Decimal(6,2)
-  notes String?
-  @@unique([userId,date])
+  user   User     @relation(fields: [userId], references: [id])
+  date   DateTime
+  weight Decimal  @db.Decimal(6, 2)
+  notes  String?
+
+  @@unique([userId, date])
+}
+
+model Authenticator {
+  id                   String    @id @default(cuid())
+  credentialID         String    @unique
+  credentialPublicKey  Bytes
+  counter              BigInt
+  credentialDeviceType String
+  credentialBackedUp   Boolean
+  transports           String?
+  userId               String
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Exercise             Exercise? @relation(fields: [exerciseId], references: [id])
+  exerciseId           String?
 }

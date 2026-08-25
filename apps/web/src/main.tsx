@@ -21,6 +21,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { api, isGuest, setGuest, setToken, token, uuid } from "./api";
+import { startRegistration, startAuthentication } from "@simplewebauthn/browser";
 import { flush, queue } from "./offline";
 import { getLanguage, setLanguage, tr } from "./i18n";
 import type { Exercise, Session, WorkoutExercise } from "./types";
@@ -268,6 +269,46 @@ function Login({ done }: { done: () => void }) {
     document.head.appendChild(s);
     return () => s.remove();
   }, []);
+  
+  const [passkeyUsername, setPasskeyUsername] = useState("");
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [passkeyErr, setPasskeyErr] = useState("");
+  const [displayName, setDisplayName] = useState("");
+
+  const handlePasskeyLogin = async (e: any) => {
+    e.preventDefault();
+    setPasskeyErr("");
+    try {
+      const opts = await api("/auth/webauthn/login-options", { method: "POST", body: JSON.stringify({ username: passkeyUsername }) });
+      const asseResp = await startAuthentication({ optionsJSON: opts });
+      const r = await api("/auth/webauthn/login-verify", { method: "POST", body: JSON.stringify({ username: passkeyUsername, response: asseResp }) });
+      setGuest(false);
+      setToken(r.token);
+      done();
+    } catch (err: any) {
+      setPasskeyErr(err.message || "Login failed");
+    }
+  };
+
+  const handlePasskeyRegister = async (e: any) => {
+    e.preventDefault();
+    setPasskeyErr("");
+    try {
+      const opts = await api("/auth/webauthn/register-options", { method: "POST", body: JSON.stringify({ username: passkeyUsername }) });
+      const attResp = await startRegistration({ optionsJSON: opts });
+      const r = await api("/auth/webauthn/register-verify", { method: "POST", body: JSON.stringify({ username: passkeyUsername, response: attResp }) });
+      setGuest(false);
+      setToken(r.token);
+      
+      if (displayName && displayName !== passkeyUsername) {
+        await api("/settings/profile", { method: "PATCH", body: JSON.stringify({ displayName }) });
+      }
+      done();
+    } catch (err: any) {
+      setPasskeyErr(err.message || "Registration failed");
+    }
+  };
+
   return (
     <div className="login">
       <div className="login-top">
@@ -277,6 +318,26 @@ function Login({ done }: { done: () => void }) {
         </div>
       </div>
       <h1>{tr("signGoogle")}</h1>
+
+      <form onSubmit={isRegistering ? handlePasskeyRegister : handlePasskeyLogin} className="passkey-login" style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <h3>{isRegistering ? "Register with Passkey" : "Login with Passkey"}</h3>
+        <label>
+          Username
+          <input value={passkeyUsername} onChange={(e) => setPasskeyUsername(e.target.value)} required />
+        </label>
+        {isRegistering && (
+          <label>
+            Display Name
+            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+          </label>
+        )}
+        {passkeyErr && <p className="error">{passkeyErr}</p>}
+        <button className="primary" type="submit">{isRegistering ? "Register" : "Login"}</button>
+        <button type="button" onClick={() => setIsRegistering(!isRegistering)} style={{ background: 'transparent', color: 'var(--accent)', border: 'none' }}>
+          {isRegistering ? "Already have an account? Login" : "Need an account? Register"}
+        </button>
+      </form>
+
       <button
         className="google-login"
         disabled={!googleReady}
@@ -995,18 +1056,38 @@ function BodyWeight() {
   );
 }
 function Admin({ logout }: { logout: () => void }) {
-  const [items, setItems] = useState<Exercise[]>(),
-    [weekdays, setWeekdays] = useState<number[]>(),
-    [daysSaved, setDaysSaved] = useState(false);
+  const [items, setItems] = useState<Exercise[]>();
+  const [weekdays, setWeekdays] = useState<number[]>();
+  const [daysSaved, setDaysSaved] = useState(false);
+  const [displayName, setDisplayName] = useState("");
+  const [profileSaved, setProfileSaved] = useState(false);
   const load = () => api("/exercises").then(setItems);
   useEffect(() => {
     load();
     api("/settings/program").then((x) => setWeekdays(x.preferredWeekdays));
+    api("/dashboard").then((x) => setDisplayName(x.displayName || ""));
   }, []);
   if (!items) return <Loading />;
   return (
     <section>
       <Header title={tr("settings")} subtitle={tr("programSettings")} />
+      
+      <Card title="Profile">
+        <label>
+          Display Name
+          <input value={displayName} onChange={(e) => { setDisplayName(e.target.value); setProfileSaved(false); }} />
+        </label>
+        <button
+          className="primary"
+          onClick={async () => {
+            await api("/settings/profile", { method: "PATCH", body: JSON.stringify({ displayName }) });
+            setProfileSaved(true);
+          }}
+        >
+          {profileSaved ? tr("saved") : "Save Profile"}
+        </button>
+      </Card>
+
       <Card title={tr("language")}>
         <LanguageSwitcher />
       </Card>
