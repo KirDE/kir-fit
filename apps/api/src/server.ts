@@ -9,6 +9,7 @@ import { OAuth2Client } from "google-auth-library";
 import multer from "multer";
 import path from "node:path";
 import fs from "node:fs";
+import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -52,8 +53,13 @@ const auth = asyncRoute(async (req: any, res: any, next: any) => {
 const userId = (req: any) => req.auth.sub as string;
 
 const rpName = "Kir Fit";
-const rpID = process.env.RP_ID || "localhost";
-const expectedOrigin = process.env.ORIGIN?.split(",")[0] || "http://localhost:5173";
+const expectedOrigins = process.env.ORIGIN?.split(",").filter(Boolean) || [
+  "http://localhost:5173",
+];
+const expectedOrigin =
+  expectedOrigins.length === 1 ? expectedOrigins[0] : expectedOrigins;
+const rpID = process.env.RP_ID || new URL(expectedOrigins[0]).hostname;
+const passkeyChallengeLifetimeMs = 5 * 60_000;
 
 const num = (v: any) => Number(v);
 
@@ -147,107 +153,167 @@ app.post(
 );
 
 
-app.post("/api/auth/webauthn/register-options", rateLimit({ windowMs: 15 * 60_000, limit: 10 }), asyncRoute(async (req, res) => {
-  const { username } = z.object({ username: z.string().min(2) }).parse(req.body);
-  let user = await prisma.user.findUnique({ where: { username } });
-  if (user) return res.status(409).json({ error: "Username already taken" });
-  user = await prisma.user.create({ data: { username, displayName: username } });
-  
-  const options = await generateRegistrationOptions({
-    rpName,
-    rpID,
-    userName: username,
-    attestationType: "none",
-    authenticatorSelection: { residentKey: "required", userVerification: "preferred" }
-  });
-  await prisma.user.update({ where: { id: user.id }, data: { currentChallenge: options.challenge } });
-  res.json(options);
-}));
-
-app.post("/api/auth/webauthn/register-verify", rateLimit({ windowMs: 15 * 60_000, limit: 10 }), asyncRoute(async (req, res) => {
-  const { username, response } = req.body;
-  const user = await prisma.user.findUnique({ where: { username } });
-  if (!user || !user.currentChallenge) return res.status(400).json({ error: "Invalid state" });
-  
-  const verification = await verifyRegistrationResponse({
-    response,
-    expectedChallenge: user.currentChallenge,
-    expectedOrigin,
-    expectedRPID: rpID,
-  });
-  
-  if (verification.verified && verification.registrationInfo) {
-    const cred = verification.registrationInfo.credential; const { id, publicKey, counter } = cred; const { credentialDeviceType, credentialBackedUp } = verification.registrationInfo;
-    await prisma.authenticator.create({
-      data: {
-        credentialID: id,
-        credentialPublicKey: Buffer.from(publicKey),
-        counter: BigInt(counter),
-        credentialDeviceType,
-        credentialBackedUp,
-        userId: user.id
-      }
+app.post(
+  "/api/auth/webauthn/register-options",
+  rateLimit({ windowMs: 15 * 60_000, limit: 10 }),
+  asyncRoute(async (_req, res) => {
+    await prisma.passkeyChallenge.deleteMany({
+      where: { expiresAt: { lt: new Date() } },
     });
-    await prisma.user.update({ where: { id: user.id }, data: { currentChallenge: null } });
-    res.json(authResponse(user));
-  } else {
-    res.status(400).json({ error: "Verification failed" });
-  }
-}));
+    const userHandle = randomBytes(32).toString("base64url");
+    const options = await generateRegistrationOptions({
+      rpName,
+      rpID,
+      userID: Buffer.from(userHandle, "base64url"),
+      userName: `passkey-${userHandle.slice(0, 12)}`,
+      userDisplayName: rpName,
+      attestationType: "none",
+      authenticatorSelection: {
+        residentKey: "required",
+        requireResidentKey: true,
+        userVerification: "required",
+      },
+    });
+    const ceremony = await prisma.passkeyChallenge.create({
+      data: {
+        challenge: options.challenge,
+        purpose: "register",
+        userHandle,
+        expiresAt: new Date(Date.now() + passkeyChallengeLifetimeMs),
+      },
+    });
+    res.json({ options, ceremonyId: ceremony.id });
+  }),
+);
 
-app.post("/api/auth/webauthn/login-options", rateLimit({ windowMs: 15 * 60_000, limit: 10 }), asyncRoute(async (req, res) => {
-  const { username } = z.object({ username: z.string().min(2) }).parse(req.body);
-  const user = await prisma.user.findUnique({ where: { username }, include: { authenticators: true } });
-  if (!user || user.authenticators.length === 0) return res.status(404).json({ error: "User not found or no passkey" });
-  
-  const options = await generateAuthenticationOptions({
-    rpID,
-    allowCredentials: user.authenticators.map(a => ({
-      id: a.credentialID,
-      transports: a.transports ? (a.transports.split(",") as any) : undefined,
-    })),
-    userVerification: "preferred"
-  });
-  
-  await prisma.user.update({ where: { id: user.id }, data: { currentChallenge: options.challenge } });
-  res.json(options);
-}));
+app.post(
+  "/api/auth/webauthn/register-verify",
+  rateLimit({ windowMs: 15 * 60_000, limit: 10 }),
+  asyncRoute(async (req, res) => {
+    const body = z
+      .object({ ceremonyId: z.string().min(1), response: z.unknown() })
+      .parse(req.body);
+    const ceremony = await consumePasskeyChallenge(
+      body.ceremonyId,
+      "register",
+    );
+    if (!ceremony.userHandle)
+      return res.status(400).json({ error: "Invalid registration state" });
+    const registrationResponse = body.response as any;
+    const verification = await verifyRegistrationResponse({
+      response: registrationResponse,
+      expectedChallenge: ceremony.challenge,
+      expectedOrigin,
+      expectedRPID: rpID,
+    });
+    if (!verification.verified || !verification.registrationInfo)
+      return res.status(400).json({ error: "Verification failed" });
 
-app.post("/api/auth/webauthn/login-verify", rateLimit({ windowMs: 15 * 60_000, limit: 10 }), asyncRoute(async (req, res) => {
-  const { username, response } = req.body;
-  const user = await prisma.user.findUnique({ where: { username }, include: { authenticators: true } });
-  if (!user || !user.currentChallenge) return res.status(400).json({ error: "Invalid state" });
-  
-  const auth = user.authenticators.find(a => a.credentialID === response.id);
-  if (!auth) return res.status(400).json({ error: "Authenticator not found" });
-  
-  const verification = await verifyAuthenticationResponse({
-    response,
-    expectedChallenge: user.currentChallenge,
-    expectedOrigin,
-    expectedRPID: rpID,
-    credential: {
-      id: auth.credentialID,
-      publicKey: Uint8Array.from(auth.credentialPublicKey),
-      counter: Number(auth.counter),
-      transports: auth.transports ? auth.transports.split(',') as any : undefined
-    } as any
-  });
-  
-  if (verification.verified) {
-    await prisma.authenticator.update({ where: { id: auth.id }, data: { counter: BigInt(verification.authenticationInfo.newCounter) } });
-    await prisma.user.update({ where: { id: user.id }, data: { currentChallenge: null } });
-    res.json(authResponse(user));
-  } else {
-    res.status(400).json({ error: "Verification failed" });
-  }
-}));
+    const { credential, credentialDeviceType, credentialBackedUp } =
+      verification.registrationInfo;
+    const user = await prisma.user.create({
+      data: {
+        username: `passkey-${ceremony.userHandle}`,
+        displayName: "",
+        authenticators: {
+          create: {
+            credentialID: credential.id,
+            credentialPublicKey: Buffer.from(credential.publicKey),
+            counter: BigInt(credential.counter),
+            credentialDeviceType,
+            credentialBackedUp,
+            transports: registrationResponse.response?.transports?.join(","),
+          },
+        },
+      },
+    });
+    try {
+      await provisionStarterProgram(user.id);
+    } catch (error) {
+      await prisma.user.delete({ where: { id: user.id } });
+      throw error;
+    }
+    res.json({ ...authResponse(user), needsDisplayName: true });
+  }),
+);
 
-app.patch("/api/settings/profile", auth, asyncRoute(async (req, res) => {
-  const { displayName } = z.object({ displayName: z.string().min(1) }).parse(req.body);
-  await prisma.user.update({ where: { id: userId(req) }, data: { displayName } });
-  res.json({ ok: true });
-}));
+app.post(
+  "/api/auth/webauthn/login-options",
+  rateLimit({ windowMs: 15 * 60_000, limit: 20 }),
+  asyncRoute(async (_req, res) => {
+    await prisma.passkeyChallenge.deleteMany({
+      where: { expiresAt: { lt: new Date() } },
+    });
+    const options = await generateAuthenticationOptions({
+      rpID,
+      userVerification: "required",
+    });
+    const ceremony = await prisma.passkeyChallenge.create({
+      data: {
+        challenge: options.challenge,
+        purpose: "login",
+        expiresAt: new Date(Date.now() + passkeyChallengeLifetimeMs),
+      },
+    });
+    res.json({ options, ceremonyId: ceremony.id });
+  }),
+);
+
+app.post(
+  "/api/auth/webauthn/login-verify",
+  rateLimit({ windowMs: 15 * 60_000, limit: 20 }),
+  asyncRoute(async (req, res) => {
+    const body = z
+      .object({
+        ceremonyId: z.string().min(1),
+        response: z.object({ id: z.string().min(1) }).passthrough(),
+      })
+      .parse(req.body);
+    const ceremony = await consumePasskeyChallenge(body.ceremonyId, "login");
+    const authenticator = await prisma.authenticator.findUnique({
+      where: { credentialID: body.response.id },
+      include: { user: true },
+    });
+    if (!authenticator)
+      return res.status(400).json({ error: "Authenticator not found" });
+    const verification = await verifyAuthenticationResponse({
+      response: body.response as any,
+      expectedChallenge: ceremony.challenge,
+      expectedOrigin,
+      expectedRPID: rpID,
+      credential: {
+        id: authenticator.credentialID,
+        publicKey: Uint8Array.from(authenticator.credentialPublicKey),
+        counter: Number(authenticator.counter),
+        transports: authenticator.transports
+          ? (authenticator.transports.split(",") as any)
+          : undefined,
+      },
+    });
+    if (!verification.verified)
+      return res.status(400).json({ error: "Verification failed" });
+    await prisma.authenticator.update({
+      where: { id: authenticator.id },
+      data: { counter: BigInt(verification.authenticationInfo.newCounter) },
+    });
+    res.json(authResponse(authenticator.user));
+  }),
+);
+
+app.patch(
+  "/api/settings/profile",
+  auth,
+  asyncRoute(async (req, res) => {
+    const { displayName } = z
+      .object({ displayName: z.string().trim().min(1).max(80) })
+      .parse(req.body);
+    const user = await prisma.user.update({
+      where: { id: userId(req) },
+      data: { displayName },
+    });
+    res.json({ displayName: user.displayName });
+  }),
+);
 
 app.get(
   "/api/dashboard",
@@ -279,6 +345,7 @@ app.get(
         )
         .slice(0, 3) || [];
     res.json({
+      displayName: u.displayName,
       nextWorkout: program
         ? nextWorkoutDay(new Date(), program.preferredWeekdays)
         : null,
@@ -682,6 +749,7 @@ app.use((err: any, _req: any, res: any, _next: any) => {
       .status(400)
       .json({ error: "Invalid input", details: err.issues });
   if (err.code === "P2025") return res.status(404).json({ error: "Not found" });
+  if (err.status) return res.status(err.status).json({ error: err.message });
   res.status(500).json({ error: "Unexpected server error" });
 });
 const port = Number(process.env.PORT || 3000);
@@ -764,6 +832,25 @@ function authResponse(user: any) {
     }),
     user: { name: user.displayName, email: user.email },
   };
+}
+async function consumePasskeyChallenge(id: string, purpose: string) {
+  const ceremony = await prisma.passkeyChallenge.findUnique({ where: { id } });
+  if (
+    !ceremony ||
+    ceremony.purpose !== purpose ||
+    ceremony.expiresAt.getTime() < Date.now()
+  )
+    throw Object.assign(new Error("Invalid or expired passkey challenge"), {
+      status: 400,
+    });
+  const consumed = await prisma.passkeyChallenge.deleteMany({
+    where: { id, purpose },
+  });
+  if (consumed.count !== 1)
+    throw Object.assign(new Error("Passkey challenge was already used"), {
+      status: 400,
+    });
+  return ceremony;
 }
 async function provisionStarterProgram(uid: string) {
   const exercises = await prisma.exercise.findMany({

@@ -232,7 +232,12 @@ function Login({ done }: { done: () => void }) {
     [p, setP] = useState(""),
     [err, setErr] = useState(""),
     [googleReady, setGoogleReady] = useState(false),
+    [passkeyBusy, setPasskeyBusy] = useState(false),
+    [passkeyErr, setPasskeyErr] = useState(""),
+    [needsDisplayName, setNeedsDisplayName] = useState(false),
+    [displayName, setDisplayName] = useState(""),
     googleRef = useRef<any>(null);
+  const passkeysSupported = typeof window.PublicKeyCredential !== "undefined";
   useEffect(() => {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
     if (!clientId) return;
@@ -262,52 +267,107 @@ function Login({ done }: { done: () => void }) {
       });
       setGoogleReady(true);
     };
-    const s = document.createElement("script");
-    s.src = "https://accounts.google.com/gsi/client";
-    s.async = true;
-    s.onload = init;
-    document.head.appendChild(s);
-    return () => s.remove();
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.onload = init;
+    document.head.appendChild(script);
+    return () => script.remove();
   }, []);
-  
-  const [passkeyUsername, setPasskeyUsername] = useState("");
-  const [isRegistering, setIsRegistering] = useState(false);
-  const [passkeyErr, setPasskeyErr] = useState("");
-  const [displayName, setDisplayName] = useState("");
 
-  const handlePasskeyLogin = async (e: any) => {
-    e.preventDefault();
+  const handlePasskeyLogin = async () => {
     setPasskeyErr("");
+    setPasskeyBusy(true);
     try {
-      const opts = await api("/auth/webauthn/login-options", { method: "POST", body: JSON.stringify({ username: passkeyUsername }) });
-      const asseResp = await startAuthentication({ optionsJSON: opts });
-      const r = await api("/auth/webauthn/login-verify", { method: "POST", body: JSON.stringify({ username: passkeyUsername, response: asseResp }) });
+      const ceremony = await api("/auth/webauthn/login-options", {
+        method: "POST",
+      });
+      const response = await startAuthentication({
+        optionsJSON: ceremony.options,
+      });
+      const result = await api("/auth/webauthn/login-verify", {
+        method: "POST",
+        body: JSON.stringify({ ceremonyId: ceremony.ceremonyId, response }),
+      });
       setGuest(false);
-      setToken(r.token);
+      setToken(result.token);
       done();
-    } catch (err: any) {
-      setPasskeyErr(err.message || "Login failed");
+    } catch (error: any) {
+      setPasskeyErr(error.message || tr("passkeyLoginFailed"));
+    } finally {
+      setPasskeyBusy(false);
     }
   };
 
-  const handlePasskeyRegister = async (e: any) => {
-    e.preventDefault();
+  const handlePasskeyRegister = async () => {
     setPasskeyErr("");
+    setPasskeyBusy(true);
     try {
-      const opts = await api("/auth/webauthn/register-options", { method: "POST", body: JSON.stringify({ username: passkeyUsername }) });
-      const attResp = await startRegistration({ optionsJSON: opts });
-      const r = await api("/auth/webauthn/register-verify", { method: "POST", body: JSON.stringify({ username: passkeyUsername, response: attResp }) });
+      const ceremony = await api("/auth/webauthn/register-options", {
+        method: "POST",
+      });
+      const response = await startRegistration({
+        optionsJSON: ceremony.options,
+      });
+      const result = await api("/auth/webauthn/register-verify", {
+        method: "POST",
+        body: JSON.stringify({ ceremonyId: ceremony.ceremonyId, response }),
+      });
       setGuest(false);
-      setToken(r.token);
-      
-      if (displayName && displayName !== passkeyUsername) {
-        await api("/settings/profile", { method: "PATCH", body: JSON.stringify({ displayName }) });
-      }
-      done();
-    } catch (err: any) {
-      setPasskeyErr(err.message || "Registration failed");
+      setToken(result.token);
+      setNeedsDisplayName(true);
+    } catch (error: any) {
+      setPasskeyErr(error.message || tr("passkeyRegistrationFailed"));
+    } finally {
+      setPasskeyBusy(false);
     }
   };
+
+  if (needsDisplayName)
+    return (
+      <div className="login name-onboarding">
+        <div className="brand">
+          <Dumbbell />
+          <b>Kir Fit</b>
+        </div>
+        <form
+          onSubmit={async (event) => {
+            event.preventDefault();
+            setPasskeyErr("");
+            setPasskeyBusy(true);
+            try {
+              await api("/settings/profile", {
+                method: "PATCH",
+                body: JSON.stringify({ displayName }),
+              });
+              done();
+            } catch (error: any) {
+              setPasskeyErr(error.message || tr("profileSaveFailed"));
+            } finally {
+              setPasskeyBusy(false);
+            }
+          }}
+        >
+          <h1>{tr("yourName")}</h1>
+          <p>{tr("namePrompt")}</p>
+          <label>
+            {tr("displayName")}
+            <input
+              autoFocus
+              autoComplete="name"
+              maxLength={80}
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              required
+            />
+          </label>
+          {passkeyErr && <p className="error">{passkeyErr}</p>}
+          <button className="primary" disabled={passkeyBusy}>
+            {tr("saveName")}
+          </button>
+        </form>
+      </div>
+    );
 
   return (
     <div className="login">
@@ -317,27 +377,26 @@ function Login({ done }: { done: () => void }) {
           <b>Kir Fit</b>
         </div>
       </div>
-      <h1>{tr("signGoogle")}</h1>
-
-      <form onSubmit={isRegistering ? handlePasskeyRegister : handlePasskeyLogin} className="passkey-login" style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        <h3>{isRegistering ? "Register with Passkey" : "Login with Passkey"}</h3>
-        <label>
-          Username
-          <input value={passkeyUsername} onChange={(e) => setPasskeyUsername(e.target.value)} required />
-        </label>
-        {isRegistering && (
-          <label>
-            Display Name
-            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
-          </label>
-        )}
-        {passkeyErr && <p className="error">{passkeyErr}</p>}
-        <button className="primary" type="submit">{isRegistering ? "Register" : "Login"}</button>
-        <button type="button" onClick={() => setIsRegistering(!isRegistering)} style={{ background: 'transparent', color: 'var(--accent)', border: 'none' }}>
-          {isRegistering ? "Already have an account? Login" : "Need an account? Register"}
+      <h1>{tr("signInTitle")}</h1>
+      <div className="passkey-actions">
+        <button
+          className="primary passkey-button"
+          disabled={!passkeysSupported || passkeyBusy}
+          onClick={handlePasskeyLogin}
+        >
+          {tr("passkeySignIn")}
         </button>
-      </form>
-
+        <button
+          className="passkey-button secondary"
+          disabled={!passkeysSupported || passkeyBusy}
+          onClick={handlePasskeyRegister}
+        >
+          {tr("passkeyRegister")}
+        </button>
+        {!passkeysSupported && <p className="error">{tr("passkeyUnavailable")}</p>}
+        {passkeyErr && <p className="error">{passkeyErr}</p>}
+      </div>
+      <div className="login-divider"><span>{tr("or")}</span></div>
       <button
         className="google-login"
         disabled={!googleReady}
@@ -364,19 +423,19 @@ function Login({ done }: { done: () => void }) {
       <details className="legacy-login">
         <summary>{tr("existingAccount")}</summary>
         <form
-          onSubmit={async (e) => {
-            e.preventDefault();
+          onSubmit={async (event) => {
+            event.preventDefault();
             setErr("");
             try {
-              const r = await api("/auth/login", {
+              const result = await api("/auth/login", {
                 method: "POST",
                 body: JSON.stringify({ username: u, password: p }),
               });
               setGuest(false);
-              setToken(r.token);
+              setToken(result.token);
               done();
-            } catch (e: any) {
-              setErr(e.message);
+            } catch (error: any) {
+              setErr(error.message);
             }
           }}
         >
@@ -385,7 +444,7 @@ function Login({ done }: { done: () => void }) {
             <input
               autoComplete="username"
               value={u}
-              onChange={(e) => setU(e.target.value)}
+              onChange={(event) => setU(event.target.value)}
             />
           </label>
           <label>
@@ -394,7 +453,7 @@ function Login({ done }: { done: () => void }) {
               type="password"
               autoComplete="current-password"
               value={p}
-              onChange={(e) => setP(e.target.value)}
+              onChange={(event) => setP(event.target.value)}
             />
           </label>
           {err && <p className="error">{err}</p>}
@@ -1061,6 +1120,7 @@ function Admin({ logout }: { logout: () => void }) {
   const [daysSaved, setDaysSaved] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [profileSaved, setProfileSaved] = useState(false);
+  const [profileError, setProfileError] = useState("");
   const load = () => api("/exercises").then(setItems);
   useEffect(() => {
     load();
@@ -1072,19 +1132,37 @@ function Admin({ logout }: { logout: () => void }) {
     <section>
       <Header title={tr("settings")} subtitle={tr("programSettings")} />
       
-      <Card title="Profile">
+      <Card title={tr("profile")}>
         <label>
-          Display Name
-          <input value={displayName} onChange={(e) => { setDisplayName(e.target.value); setProfileSaved(false); }} />
+          {tr("displayName")}
+          <input
+            maxLength={80}
+            value={displayName}
+            onChange={(event) => {
+              setDisplayName(event.target.value);
+              setProfileSaved(false);
+              setProfileError("");
+            }}
+          />
         </label>
+        {profileError && <p className="error">{profileError}</p>}
         <button
           className="primary"
+          disabled={!displayName.trim()}
           onClick={async () => {
-            await api("/settings/profile", { method: "PATCH", body: JSON.stringify({ displayName }) });
-            setProfileSaved(true);
+            try {
+              const result = await api("/settings/profile", {
+                method: "PATCH",
+                body: JSON.stringify({ displayName }),
+              });
+              setDisplayName(result.displayName);
+              setProfileSaved(true);
+            } catch (error: any) {
+              setProfileError(error.message || tr("profileSaveFailed"));
+            }
           }}
         >
-          {profileSaved ? tr("saved") : "Save Profile"}
+          {profileSaved ? tr("saved") : tr("saveProfile")}
         </button>
       </Card>
 

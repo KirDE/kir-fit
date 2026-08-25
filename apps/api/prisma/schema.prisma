@@ -22,7 +22,6 @@ model User {
   bodyWeights      BodyWeightEntry[]
   machines         Machine[]
   authenticators   Authenticator[]
-  currentChallenge String?
 }
 
 model Exercise {
@@ -50,8 +49,6 @@ model Exercise {
   templateExercises  WorkoutTemplateExercise[]
   workoutExercises   WorkoutExercise[]
   machines           Machine[]
-  authenticators     Authenticator[]
-  currentChallenge   String?
   createdAt          DateTime                  @default(now())
   updatedAt          DateTime                  @updatedAt
 }
@@ -183,15 +180,24 @@ model BodyWeightEntry {
 }
 
 model Authenticator {
-  id                   String    @id @default(cuid())
-  credentialID         String    @unique
+  id                   String  @id @default(cuid())
+  credentialID         String  @unique
   credentialPublicKey  Bytes
   counter              BigInt
   credentialDeviceType String
   credentialBackedUp   Boolean
   transports           String?
   userId               String
-  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  Exercise             Exercise? @relation(fields: [exerciseId], references: [id])
-  exerciseId           String?
+  user                 User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model PasskeyChallenge {
+  id         String   @id @default(cuid())
+  challenge  String
+  purpose    String
+  userHandle String?
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+
+  @@index([expiresAt])
 }
