@@ -316,6 +316,120 @@ app.patch(
 );
 
 app.get(
+  "/api/settings/profile",
+  auth,
+  asyncRoute(async (req, res) => {
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { id: userId(req) },
+      select: {
+        displayName: true,
+        googleSub: true,
+        _count: { select: { authenticators: true } },
+      },
+    });
+    res.json({
+      displayName: user.displayName,
+      googleLinked: Boolean(user.googleSub),
+      hasPasskey: user._count.authenticators > 0,
+    });
+  }),
+);
+
+app.post(
+  "/api/settings/passkeys/register-options",
+  auth,
+  rateLimit({ windowMs: 15 * 60_000, limit: 10 }),
+  asyncRoute(async (req, res) => {
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { id: userId(req) },
+      include: { authenticators: true },
+    });
+    if (!user.googleSub)
+      return res.status(400).json({ error: "Google account required" });
+    if (user.authenticators.length)
+      return res.status(409).json({ error: "A passkey is already registered" });
+
+    await prisma.passkeyChallenge.deleteMany({
+      where: { expiresAt: { lt: new Date() } },
+    });
+    const options = await generateRegistrationOptions({
+      rpName,
+      rpID,
+      userID: Buffer.from(user.id),
+      userName: user.email || user.username,
+      userDisplayName: user.displayName || user.email || user.username,
+      attestationType: "none",
+      authenticatorSelection: {
+        residentKey: "required",
+        requireResidentKey: true,
+        userVerification: "required",
+      },
+    });
+    const ceremony = await prisma.passkeyChallenge.create({
+      data: {
+        challenge: options.challenge,
+        purpose: "link-passkey",
+        userHandle: user.id,
+        expiresAt: new Date(Date.now() + passkeyChallengeLifetimeMs),
+      },
+    });
+    res.json({ options, ceremonyId: ceremony.id });
+  }),
+);
+
+app.post(
+  "/api/settings/passkeys/register-verify",
+  auth,
+  rateLimit({ windowMs: 15 * 60_000, limit: 10 }),
+  asyncRoute(async (req, res) => {
+    const body = z
+      .object({ ceremonyId: z.string().min(1), response: z.unknown() })
+      .parse(req.body);
+    const uid = userId(req);
+    const ceremony = await consumePasskeyChallenge(
+      body.ceremonyId,
+      "link-passkey",
+    );
+    if (ceremony.userHandle !== uid)
+      return res.status(400).json({ error: "Invalid registration state" });
+
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { id: uid },
+      include: { authenticators: true },
+    });
+    if (!user.googleSub)
+      return res.status(400).json({ error: "Google account required" });
+    if (user.authenticators.length)
+      return res.status(409).json({ error: "A passkey is already registered" });
+
+    const registrationResponse = body.response as any;
+    const verification = await verifyRegistrationResponse({
+      response: registrationResponse,
+      expectedChallenge: ceremony.challenge,
+      expectedOrigin,
+      expectedRPID: rpID,
+    });
+    if (!verification.verified || !verification.registrationInfo)
+      return res.status(400).json({ error: "Verification failed" });
+
+    const { credential, credentialDeviceType, credentialBackedUp } =
+      verification.registrationInfo;
+    await prisma.authenticator.create({
+      data: {
+        userId: uid,
+        credentialID: credential.id,
+        credentialPublicKey: Buffer.from(credential.publicKey),
+        counter: BigInt(credential.counter),
+        credentialDeviceType,
+        credentialBackedUp,
+        transports: registrationResponse.response?.transports?.join(","),
+      },
+    });
+    res.json({ hasPasskey: true });
+  }),
+);
+
+app.get(
   "/api/dashboard",
   auth,
   asyncRoute(async (req, res) => {

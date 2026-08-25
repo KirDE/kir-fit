@@ -1119,13 +1119,30 @@ function Admin({ logout }: { logout: () => void }) {
   const [weekdays, setWeekdays] = useState<number[]>();
   const [daysSaved, setDaysSaved] = useState(false);
   const [displayName, setDisplayName] = useState("");
+  const [accountSecurity, setAccountSecurity] = useState<{
+    googleLinked: boolean;
+    hasPasskey: boolean;
+  }>();
   const [profileSaved, setProfileSaved] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [passkeyError, setPasskeyError] = useState("");
+  const [passkeyAdded, setPasskeyAdded] = useState(false);
+  const passkeysSupported = typeof window.PublicKeyCredential !== "undefined";
   const load = () => api("/exercises").then(setItems);
   useEffect(() => {
     load();
     api("/settings/program").then((x) => setWeekdays(x.preferredWeekdays));
-    api("/dashboard").then((x) => setDisplayName(x.displayName || ""));
+    if (isGuest())
+      api("/dashboard").then((x) => setDisplayName(x.displayName || ""));
+    else
+      api("/settings/profile").then((x) => {
+        setDisplayName(x.displayName || "");
+        setAccountSecurity({
+          googleLinked: x.googleLinked,
+          hasPasskey: x.hasPasskey,
+        });
+      });
   }, []);
   if (!items) return <Loading />;
   return (
@@ -1165,6 +1182,59 @@ function Admin({ logout }: { logout: () => void }) {
           {profileSaved ? tr("saved") : tr("saveProfile")}
         </button>
       </Card>
+
+      {accountSecurity?.googleLinked &&
+        (!accountSecurity.hasPasskey || passkeyAdded) && (
+          <Card title={tr("passkeySettings")}>
+            {passkeyAdded ? (
+              <p>{tr("passkeyAdded")}</p>
+            ) : (
+              <>
+                <p>{tr("addPasskeyDescription")}</p>
+                {passkeyError && <p className="error">{passkeyError}</p>}
+                {!passkeysSupported && (
+                  <p className="error">{tr("passkeyUnavailable")}</p>
+                )}
+                <button
+                  className="primary"
+                  disabled={!passkeysSupported || passkeyBusy}
+                  onClick={async () => {
+                    setPasskeyError("");
+                    setPasskeyBusy(true);
+                    try {
+                      const ceremony = await api(
+                        "/settings/passkeys/register-options",
+                        { method: "POST" },
+                      );
+                      const response = await startRegistration({
+                        optionsJSON: ceremony.options,
+                      });
+                      await api("/settings/passkeys/register-verify", {
+                        method: "POST",
+                        body: JSON.stringify({
+                          ceremonyId: ceremony.ceremonyId,
+                          response,
+                        }),
+                      });
+                      setAccountSecurity((current) =>
+                        current ? { ...current, hasPasskey: true } : current,
+                      );
+                      setPasskeyAdded(true);
+                    } catch (error: any) {
+                      setPasskeyError(
+                        error.message || tr("passkeyRegistrationFailed"),
+                      );
+                    } finally {
+                      setPasskeyBusy(false);
+                    }
+                  }}
+                >
+                  {tr("addPasskey")}
+                </button>
+              </>
+            )}
+          </Card>
+        )}
 
       <Card title={tr("language")}>
         <LanguageSwitcher />
