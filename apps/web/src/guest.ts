@@ -148,11 +148,16 @@ type State = {
   sessions: any[];
   weights: any[];
   preferredWeekdays: number[];
+  exerciseSettings: Record<
+    string,
+    { plannedSets: number; measurementUnit: "kg" | "units" }
+  >;
 };
 const fresh = (): State => ({
   sessions: [],
   weights: [],
   preferredWeekdays: [0, 3, 5],
+  exerciseSettings: {},
 });
 const load = (): State => {
   try {
@@ -162,6 +167,7 @@ const load = (): State => {
       (x: any) => x.id !== "initial",
     );
     stored.preferredWeekdays ||= [0, 3, 5];
+    stored.exerciseSettings ||= {};
     return stored;
   } catch {
     return fresh();
@@ -191,6 +197,7 @@ const session = (s: any) => ({
   summary: summary(s),
   exercises: s.exercises.map((e: any) => ({
     ...e,
+    measurementUnit: e.measurementUnit || "kg",
     suggestIncrease:
       e.sets.length === e.plannedSets &&
       e.sets.every((x: any) => x.reps >= e.maxReps),
@@ -224,26 +231,31 @@ export async function guestApi(path: string, init: RequestInit = {}) {
       id: crypto.randomUUID(),
       startedAt: new Date().toISOString(),
       status: "active",
-      exercises: exercises.map((e: any, i) => ({
-        id: crypto.randomUUID(),
-        exercise: copy(e),
-        sortOrder: i + 1,
-        plannedSets:
-          intro &&
-          [
-            "leg-press",
-            "chest-press",
-            "lat-pulldown",
-            "seated-row",
-            "shoulder-press",
-          ].includes(e.id)
-            ? Math.min(2, e.defaultSets)
-            : e.defaultSets,
-        minReps: e.minReps,
-        maxReps: e.maxReps,
-        restSeconds: e.defaultRestSeconds,
-        sets: [],
-      })),
+      exercises: exercises.map((e: any, i) => {
+        const settings = state.exerciseSettings[e.id];
+        return {
+          id: crypto.randomUUID(),
+          exercise: copy(e),
+          sortOrder: i + 1,
+          plannedSets:
+            settings?.plannedSets ??
+            (intro &&
+            [
+              "leg-press",
+              "chest-press",
+              "lat-pulldown",
+              "seated-row",
+              "shoulder-press",
+            ].includes(e.id)
+              ? Math.min(2, e.defaultSets)
+              : e.defaultSets),
+          minReps: e.minReps,
+          maxReps: e.maxReps,
+          restSeconds: e.defaultRestSeconds,
+          measurementUnit: settings?.measurementUnit || "kg",
+          sets: [],
+        };
+      }),
     };
     state.sessions.push(s);
     save(state);
@@ -266,6 +278,20 @@ export async function guestApi(path: string, init: RequestInit = {}) {
     e.sets.push(row);
     save(state);
     return row;
+  }
+  m = path.match(/^\/workouts\/([^/]+)\/exercises\/([^/]+)\/settings$/);
+  if (m && method === "PATCH") {
+    const s = state.sessions.find((x) => x.id === m![1]);
+    const e = s.exercises.find((x: any) => x.id === m![2]);
+    const settings = body(init);
+    e.plannedSets = settings.plannedSets;
+    e.measurementUnit = settings.measurementUnit;
+    state.exerciseSettings[e.exercise.id] = {
+      plannedSets: settings.plannedSets,
+      measurementUnit: settings.measurementUnit,
+    };
+    save(state);
+    return session(s);
   }
   m = path.match(/^\/workouts\/([^/]+)\/sets\/([^/]+)$/);
   if (m && method === "DELETE") {

@@ -570,6 +570,7 @@ app.post(
             minReps: t.minReps,
             maxReps: t.maxReps,
             restSeconds: t.restSeconds,
+            measurementUnit: t.measurementUnit,
             exerciseNameSnapshot: t.exercise.nameEn,
             machineId: t.exercise.machines[0]?.id,
             machineSettingsSnapshot: t.exercise.machines[0]
@@ -620,6 +621,49 @@ app.post(
       },
     });
     res.status(201).json({ ...set, weight: num(set.weight) });
+  }),
+);
+app.patch(
+  "/api/workouts/:sessionId/exercises/:exerciseId/settings",
+  auth,
+  asyncRoute(async (req, res) => {
+    const body = z
+      .object({
+        plannedSets: z.number().int().min(1).max(20),
+        measurementUnit: z.enum(["kg", "units"]),
+      })
+      .parse(req.body);
+    const exercise = await prisma.workoutExercise.findFirstOrThrow({
+      where: {
+        id: req.params.exerciseId,
+        sessionId: req.params.sessionId,
+        session: { userId: userId(req), status: "active" },
+      },
+      include: { session: true },
+    });
+    await prisma.$transaction([
+      prisma.workoutExercise.update({
+        where: { id: exercise.id },
+        data: body,
+      }),
+      prisma.workoutTemplateExercise.update({
+        where: {
+          templateId_exerciseId: {
+            templateId: exercise.session.templateId,
+            exerciseId: exercise.exerciseId,
+          },
+        },
+        data: {
+          sets: body.plannedSets,
+          measurementUnit: body.measurementUnit,
+        },
+      }),
+    ]);
+    const session = await prisma.workoutSession.findUniqueOrThrow({
+      where: { id: exercise.sessionId },
+      include: sessionInclude,
+    });
+    res.json(serializeSession(session));
   }),
 );
 app.delete(
@@ -727,6 +771,7 @@ app.get(
         })),
       history: rows.map((r) => ({
         date: r.session.finishedAt,
+        measurementUnit: r.measurementUnit,
         weight: Math.max(0, ...r.sets.map((s) => num(s.weight))),
         volume: volume(
           r.sets.map((s) => ({ weight: num(s.weight), reps: s.reps })),

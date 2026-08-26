@@ -46,6 +46,33 @@ describe("guest persistence", () => {
       preferredWeekdays: [2, 4],
     });
   });
+  it("persists set count and unit settings for the next workout", async () => {
+    const started: any = await guestApi("/workouts/start", {
+      method: "POST",
+      body: JSON.stringify({ introWeeks: true }),
+    });
+    const exercise = started.exercises[0];
+    const updated: any = await guestApi(
+      `/workouts/${started.id}/exercises/${exercise.id}/settings`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ plannedSets: 4, measurementUnit: "units" }),
+      },
+    );
+    expect(updated.exercises[0]).toMatchObject({
+      plannedSets: 4,
+      measurementUnit: "units",
+    });
+    await guestApi(`/workouts/${started.id}/finish`, { method: "POST" });
+    const next: any = await guestApi("/workouts/start", {
+      method: "POST",
+      body: JSON.stringify({ introWeeks: true }),
+    });
+    expect(next.exercises[0]).toMatchObject({
+      plannedSets: 4,
+      measurementUnit: "units",
+    });
+  });
   it("provides Russian interface messages", () => {
     localStorage.setItem("kirfit_language", "ru");
     expect(tr("startWorkout")).toBe("Начать тренировку");

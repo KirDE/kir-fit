@@ -84,17 +84,18 @@ model WorkoutTemplate {
 }
 
 model WorkoutTemplateExercise {
-  id          String          @id @default(cuid())
-  templateId  String
-  template    WorkoutTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  exerciseId  String
-  exercise    Exercise        @relation(fields: [exerciseId], references: [id])
-  sortOrder   Int
-  sets        Int
-  minReps     Int
-  maxReps     Int
-  restSeconds Int
-  increment   Decimal         @db.Decimal(6, 2)
+  id              String          @id @default(cuid())
+  templateId      String
+  template        WorkoutTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  exerciseId      String
+  exercise        Exercise        @relation(fields: [exerciseId], references: [id])
+  sortOrder       Int
+  sets            Int
+  minReps         Int
+  maxReps         Int
+  restSeconds     Int
+  increment       Decimal         @db.Decimal(6, 2)
+  measurementUnit String          @default("kg")
 
   @@unique([templateId, exerciseId])
 }
@@ -149,6 +150,7 @@ model WorkoutExercise {
   minReps                 Int
   maxReps                 Int
   restSeconds             Int
+  measurementUnit         String         @default("kg")
   exerciseNameSnapshot    String
   machineSettingsSnapshot Json?
   sets                    WorkoutSet[]
