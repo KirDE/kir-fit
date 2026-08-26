@@ -372,6 +372,31 @@
 .settings-popup-title svg {
   width: 19px;
 }
+.confirm-popup p {
+  margin: -4px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.confirm-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.confirm-actions > button {
+  min-height: 48px;
+  border-radius: 12px;
+  font-weight: 800;
+}
+.confirm-actions > button:first-child {
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--text);
+}
+.confirm-danger {
+  border: 1px solid #ff6b6b88;
+  background: var(--danger);
+  color: #fff;
+}
 .settings-name {
   display: grid;
   gap: 7px;

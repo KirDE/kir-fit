@@ -546,6 +546,7 @@ function Workout({ done }: { done: () => void }) {
     [rest, setRest] = useState<number | null>(null),
     [showCompleted, setShowCompleted] = useState(false),
     [finishing, setFinishing] = useState(false),
+    [finishConfirmOpen, setFinishConfirmOpen] = useState(false),
     [finishError, setFinishError] = useState("");
   useEffect(() => {
     api("/workouts/active").then(async (active) => {
@@ -614,9 +615,6 @@ function Workout({ done }: { done: () => void }) {
       setFinishError(tr("finishError"));
       setFinishing(false);
     }
-  };
-  const confirmFinish = () => {
-    if (window.confirm(tr("finishConfirm"))) void finish();
   };
   const save = async (data: any) => {
     if (!ex) return;
@@ -720,7 +718,7 @@ function Workout({ done }: { done: () => void }) {
             ) : completedCount === s.exercises.length ? (
               <button
                 className="primary"
-                onClick={confirmFinish}
+                onClick={() => setFinishConfirmOpen(true)}
                 disabled={finishing}
               >
                 {tr("finish")}
@@ -734,14 +732,82 @@ function Workout({ done }: { done: () => void }) {
           <b>{tr("allExercisesCompleted")}</b>
           <button
             className="primary"
-            onClick={confirmFinish}
+            onClick={() => setFinishConfirmOpen(true)}
             disabled={finishing}
           >
             {tr("finish")}
           </button>
         </div>
       )}
+      <ConfirmDialog
+        open={finishConfirmOpen}
+        title={tr("finish")}
+        text={tr("finishConfirm")}
+        confirmLabel={tr("finish")}
+        busy={finishing}
+        onCancel={() => setFinishConfirmOpen(false)}
+        onConfirm={() => {
+          setFinishConfirmOpen(false);
+          void finish();
+        }}
+      />
     </section>
+  );
+}
+function ConfirmDialog({
+  open,
+  title,
+  text,
+  confirmLabel,
+  danger = false,
+  busy = false,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  text: string;
+  confirmLabel: string;
+  danger?: boolean;
+  busy?: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div
+      className="settings-popup-backdrop"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="confirm-dialog-title"
+      onClick={() => !busy && onCancel()}
+    >
+      <div
+        className="settings-popup confirm-popup"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="settings-popup-title">
+          <b id="confirm-dialog-title">{title}</b>
+          <button type="button" disabled={busy} onClick={onCancel}>
+            <X />
+          </button>
+        </div>
+        <p>{text}</p>
+        <div className="confirm-actions">
+          <button type="button" disabled={busy} onClick={onCancel}>
+            {tr("cancel")}
+          </button>
+          <button
+            type="button"
+            className={danger ? "confirm-danger" : "primary"}
+            disabled={busy}
+            onClick={onConfirm}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 function ZoomableImage({
@@ -1122,7 +1188,9 @@ function RestTimer({
 }
 function History({ resume }: { resume: () => void }) {
   const [rows, setRows] = useState<Session[]>(),
-    [resumeError, setResumeError] = useState("");
+    [resumeError, setResumeError] = useState(""),
+    [deleteTarget, setDeleteTarget] = useState<Session>(),
+    [deleting, setDeleting] = useState(false);
   useEffect(() => {
     api("/history").then(setRows);
   }, []);
@@ -1203,18 +1271,7 @@ function History({ resume }: { resume: () => void }) {
             <button
               type="button"
               className="delete-workout"
-              onClick={async () => {
-                if (!window.confirm(tr("deleteWorkoutConfirm"))) return;
-                setResumeError("");
-                try {
-                  await api(`/workouts/${s.id}`, { method: "DELETE" });
-                  setRows((current) =>
-                    current?.filter((workout) => workout.id !== s.id),
-                  );
-                } catch (error: any) {
-                  setResumeError(error.message || tr("deleteWorkoutError"));
-                }
-              }}
+              onClick={() => setDeleteTarget(s)}
             >
               {tr("deleteWorkout")}
             </button>
@@ -1222,6 +1279,31 @@ function History({ resume }: { resume: () => void }) {
         ))}
         {!rows.length && <Empty text={tr("emptyHistory")} />}
       </div>
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title={tr("deleteWorkout")}
+        text={tr("deleteWorkoutConfirm")}
+        confirmLabel={tr("deleteWorkout")}
+        danger
+        busy={deleting}
+        onCancel={() => setDeleteTarget(undefined)}
+        onConfirm={async () => {
+          if (!deleteTarget || deleting) return;
+          setDeleting(true);
+          setResumeError("");
+          try {
+            await api(`/workouts/${deleteTarget.id}`, { method: "DELETE" });
+            setRows((current) =>
+              current?.filter((workout) => workout.id !== deleteTarget.id),
+            );
+            setDeleteTarget(undefined);
+          } catch (error: any) {
+            setResumeError(error.message || tr("deleteWorkoutError"));
+          } finally {
+            setDeleting(false);
+          }
+        }}
+      />
     </section>
   );
 }
