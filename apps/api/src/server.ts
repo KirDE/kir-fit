@@ -762,6 +762,20 @@ app.post(
     res.json(serializeSession(resumed));
   }),
 );
+app.delete(
+  "/api/workouts/:id",
+  auth,
+  asyncRoute(async (req, res) => {
+    await prisma.workoutSession.delete({
+      where: {
+        id: req.params.id,
+        userId: userId(req),
+        status: "completed",
+      },
+    });
+    res.status(204).end();
+  }),
+);
 app.patch(
   "/api/sets/:id",
   auth,

@@ -65,6 +65,10 @@ const en = {
   finishError: "The workout could not be finished. Check the connection and try again.",
   resumeWorkout: "Resume workout",
   resumeError: "The workout could not be resumed.",
+  deleteWorkout: "Delete workout",
+  deleteWorkoutConfirm:
+    "Delete this workout and all of its recorded sets? This cannot be undone.",
+  deleteWorkoutError: "The workout could not be deleted.",
   startError: "Could not start workout.",
   rest: "REST",
   skip: "Skip",
@@ -171,6 +175,10 @@ const de: typeof en = {
     "Das Training konnte nicht beendet werden. Prüfe die Verbindung und versuche es erneut.",
   resumeWorkout: "Training fortsetzen",
   resumeError: "Das Training konnte nicht fortgesetzt werden.",
+  deleteWorkout: "Training löschen",
+  deleteWorkoutConfirm:
+    "Dieses Training mit allen gespeicherten Sätzen löschen? Dies kann nicht rückgängig gemacht werden.",
+  deleteWorkoutError: "Das Training konnte nicht gelöscht werden.",
   startError: "Training konnte nicht gestartet werden.",
   rest: "PAUSE",
   skip: "Überspringen",
@@ -277,6 +285,10 @@ const ru: typeof en = {
     "Не удалось завершить тренировку. Проверьте соединение и попробуйте ещё раз.",
   resumeWorkout: "Возобновить тренировку",
   resumeError: "Не удалось возобновить тренировку.",
+  deleteWorkout: "Удалить тренировку",
+  deleteWorkoutConfirm:
+    "Удалить эту тренировку и все записанные подходы? Это действие нельзя отменить.",
+  deleteWorkoutError: "Не удалось удалить тренировку.",
   startError: "Не удалось начать тренировку.",
   rest: "ОТДЫХ",
   skip: "Пропустить",

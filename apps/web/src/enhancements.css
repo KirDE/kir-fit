@@ -430,6 +430,16 @@
   color: var(--accent);
   font-weight: 800;
 }
+.delete-workout {
+  width: 100%;
+  min-height: 42px;
+  margin-top: 8px;
+  border: 1px solid #ff6b6b55;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--danger);
+  font-weight: 800;
+}
 .unit-picker {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -109,6 +109,13 @@ describe("guest persistence", () => {
     expect(resumed).toMatchObject({ id: started.id, status: "active" });
     expect(resumed.finishedAt).toBeUndefined();
   });
+  it("deletes a completed workout from history", async () => {
+    const started: any = await guestApi("/workouts/start", { method: "POST" });
+    await guestApi(`/workouts/${started.id}/finish`, { method: "POST" });
+    expect(await guestApi("/history")).toHaveLength(1);
+    await guestApi(`/workouts/${started.id}`, { method: "DELETE" });
+    expect(await guestApi("/history")).toEqual([]);
+  });
   it("provides Russian interface messages", () => {
     localStorage.setItem("kirfit_language", "ru");
     expect(tr("startWorkout")).toBe("Начать тренировку");

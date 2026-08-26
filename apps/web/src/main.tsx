@@ -1200,6 +1200,24 @@ function History({ resume }: { resume: () => void }) {
                 {tr("resumeWorkout")}
               </button>
             )}
+            <button
+              type="button"
+              className="delete-workout"
+              onClick={async () => {
+                if (!window.confirm(tr("deleteWorkoutConfirm"))) return;
+                setResumeError("");
+                try {
+                  await api(`/workouts/${s.id}`, { method: "DELETE" });
+                  setRows((current) =>
+                    current?.filter((workout) => workout.id !== s.id),
+                  );
+                } catch (error: any) {
+                  setResumeError(error.message || tr("deleteWorkoutError"));
+                }
+              }}
+            >
+              {tr("deleteWorkout")}
+            </button>
           </details>
         ))}
         {!rows.length && <Empty text={tr("emptyHistory")} />}
