@@ -92,6 +92,23 @@ describe("guest persistence", () => {
       lastRir: 2,
     });
   });
+  it("resumes a workout completed today", async () => {
+    const started: any = await guestApi("/workouts/start", { method: "POST" });
+    await guestApi(`/workouts/${started.id}/finish`, { method: "POST" });
+    const today = new Date();
+    const localDate = `${today.getFullYear()}-${String(
+      today.getMonth() + 1,
+    ).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const resumed: any = await guestApi(`/workouts/${started.id}/resume`, {
+      method: "POST",
+      body: JSON.stringify({
+        localDate,
+        timezoneOffsetMinutes: today.getTimezoneOffset(),
+      }),
+    });
+    expect(resumed).toMatchObject({ id: started.id, status: "active" });
+    expect(resumed.finishedAt).toBeUndefined();
+  });
   it("provides Russian interface messages", () => {
     localStorage.setItem("kirfit_language", "ru");
     expect(tr("startWorkout")).toBe("Начать тренировку");

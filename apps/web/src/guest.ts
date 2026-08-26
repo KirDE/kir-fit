@@ -338,6 +338,23 @@ export async function guestApi(path: string, init: RequestInit = {}) {
     save(state);
     return session(s);
   }
+  m = path.match(/^\/workouts\/([^/]+)\/resume$/);
+  if (m && method === "POST") {
+    const s = state.sessions.find((x) => x.id === m![1]);
+    const requestedDate = body(init).localDate;
+    const finished = new Date(s.finishedAt);
+    const finishedDate = `${finished.getFullYear()}-${String(
+      finished.getMonth() + 1,
+    ).padStart(2, "0")}-${String(finished.getDate()).padStart(2, "0")}`;
+    if (s.status !== "completed" || finishedDate !== requestedDate)
+      throw new Error("Only today's workout can be resumed");
+    if (state.sessions.some((item) => item.status === "active"))
+      throw new Error("An active workout already exists");
+    s.status = "active";
+    delete s.finishedAt;
+    save(state);
+    return session(s);
+  }
   if (path === "/history")
     return state.sessions
       .filter((s) => s.status === "completed")

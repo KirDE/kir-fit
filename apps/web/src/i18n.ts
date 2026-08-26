@@ -61,7 +61,10 @@ const en = {
   previous: "Previous",
   nextExercise: "Next exercise",
   finish: "Finish workout",
+  finishConfirm: "Finish this workout? You can resume it from today's history.",
   finishError: "The workout could not be finished. Check the connection and try again.",
+  resumeWorkout: "Resume workout",
+  resumeError: "The workout could not be resumed.",
   startError: "Could not start workout.",
   rest: "REST",
   skip: "Skip",
@@ -162,8 +165,12 @@ const de: typeof en = {
   previous: "Zurück",
   nextExercise: "Nächste Übung",
   finish: "Training beenden",
+  finishConfirm:
+    "Training beenden? Du kannst es heute im Verlauf wieder aufnehmen.",
   finishError:
     "Das Training konnte nicht beendet werden. Prüfe die Verbindung und versuche es erneut.",
+  resumeWorkout: "Training fortsetzen",
+  resumeError: "Das Training konnte nicht fortgesetzt werden.",
   startError: "Training konnte nicht gestartet werden.",
   rest: "PAUSE",
   skip: "Überspringen",
@@ -264,8 +271,12 @@ const ru: typeof en = {
   previous: "Назад",
   nextExercise: "Следующее упражнение",
   finish: "Завершить тренировку",
+  finishConfirm:
+    "Завершить тренировку? Сегодня её можно будет возобновить из истории.",
   finishError:
     "Не удалось завершить тренировку. Проверьте соединение и попробуйте ещё раз.",
+  resumeWorkout: "Возобновить тренировку",
+  resumeError: "Не удалось возобновить тренировку.",
   startError: "Не удалось начать тренировку.",
   rest: "ОТДЫХ",
   skip: "Пропустить",

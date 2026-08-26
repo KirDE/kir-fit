@@ -150,7 +150,7 @@ function App() {
           />
         )}{" "}
         {view === "workout" && <Workout done={() => setView("home")} />}{" "}
-        {view === "history" && <History />}{" "}
+        {view === "history" && <History resume={() => setView("workout")} />}{" "}
         {view === "progress" && <Progress />}{" "}
         {view === "weight" && <BodyWeight />}{" "}
         {view === "admin" && (
@@ -615,6 +615,9 @@ function Workout({ done }: { done: () => void }) {
       setFinishing(false);
     }
   };
+  const confirmFinish = () => {
+    if (window.confirm(tr("finishConfirm"))) void finish();
+  };
   const save = async (data: any) => {
     if (!ex) return;
     const mutation = uuid();
@@ -715,7 +718,11 @@ function Workout({ done }: { done: () => void }) {
                 {tr("nextExercise")}
               </button>
             ) : completedCount === s.exercises.length ? (
-              <button className="primary" onClick={finish} disabled={finishing}>
+              <button
+                className="primary"
+                onClick={confirmFinish}
+                disabled={finishing}
+              >
                 {tr("finish")}
               </button>
             ) : null}
@@ -725,7 +732,11 @@ function Workout({ done }: { done: () => void }) {
         <div className="workout-complete">
           <Dumbbell />
           <b>{tr("allExercisesCompleted")}</b>
-          <button className="primary" onClick={finish} disabled={finishing}>
+          <button
+            className="primary"
+            onClick={confirmFinish}
+            disabled={finishing}
+          >
             {tr("finish")}
           </button>
         </div>
@@ -1109,15 +1120,31 @@ function RestTimer({
     </div>
   );
 }
-function History() {
-  const [rows, setRows] = useState<Session[]>();
+function History({ resume }: { resume: () => void }) {
+  const [rows, setRows] = useState<Session[]>(),
+    [resumeError, setResumeError] = useState("");
   useEffect(() => {
     api("/history").then(setRows);
   }, []);
   if (!rows) return <Loading />;
+  const today = new Date();
+  const localDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(
+    2,
+    "0",
+  )}-${String(today.getDate()).padStart(2, "0")}`;
+  const isToday = (value?: string) => {
+    if (!value) return false;
+    const date = new Date(value);
+    return (
+      date.getFullYear() === today.getFullYear() &&
+      date.getMonth() === today.getMonth() &&
+      date.getDate() === today.getDate()
+    );
+  };
   return (
     <section>
       <Header title={tr("history")} />
+      {resumeError && <p className="error">{resumeError}</p>}
       <div className="list">
         {rows.map((s) => (
           <details className="history" key={s.id}>
@@ -1150,6 +1177,29 @@ function History() {
                   </span>
                 </div>
               ))}
+            {isToday(s.finishedAt) && (
+              <button
+                type="button"
+                className="resume-workout"
+                onClick={async () => {
+                  setResumeError("");
+                  try {
+                    await api(`/workouts/${s.id}/resume`, {
+                      method: "POST",
+                      body: JSON.stringify({
+                        localDate,
+                        timezoneOffsetMinutes: today.getTimezoneOffset(),
+                      }),
+                    });
+                    resume();
+                  } catch (error: any) {
+                    setResumeError(error.message || tr("resumeError"));
+                  }
+                }}
+              >
+                {tr("resumeWorkout")}
+              </button>
+            )}
           </details>
         ))}
         {!rows.length && <Empty text={tr("emptyHistory")} />}

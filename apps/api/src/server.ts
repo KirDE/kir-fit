@@ -724,6 +724,44 @@ app.post(
     res.json(serializeSession(s));
   }),
 );
+app.post(
+  "/api/workouts/:id/resume",
+  auth,
+  asyncRoute(async (req, res) => {
+    const body = z
+      .object({
+        localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        timezoneOffsetMinutes: z.number().int().min(-840).max(840),
+      })
+      .parse(req.body);
+    const [year, month, day] = body.localDate.split("-").map(Number);
+    const start = new Date(
+      Date.UTC(year, month - 1, day) + body.timezoneOffsetMinutes * 60_000,
+    );
+    const end = new Date(start.getTime() + 24 * 60 * 60_000);
+    const session = await prisma.workoutSession.findFirstOrThrow({
+      where: {
+        id: req.params.id,
+        userId: userId(req),
+        status: "completed",
+        finishedAt: { gte: start, lt: end },
+      },
+    });
+    const active = await prisma.workoutSession.findFirst({
+      where: { userId: userId(req), status: "active" },
+    });
+    if (active)
+      throw Object.assign(new Error("An active workout already exists"), {
+        status: 409,
+      });
+    const resumed = await prisma.workoutSession.update({
+      where: { id: session.id },
+      data: { status: "active", finishedAt: null },
+      include: sessionInclude,
+    });
+    res.json(serializeSession(resumed));
+  }),
+);
 app.patch(
   "/api/sets/:id",
   auth,
