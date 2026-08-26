@@ -150,7 +150,14 @@ type State = {
   preferredWeekdays: number[];
   exerciseSettings: Record<
     string,
-    { plannedSets: number; measurementUnit: "kg" | "units" }
+    {
+      plannedSets: number;
+      measurementUnit: "kg" | "units";
+      customName?: string | null;
+      lastWeight?: number | null;
+      lastReps?: number | null;
+      lastRir?: number | null;
+    }
   >;
 };
 const fresh = (): State => ({
@@ -253,6 +260,10 @@ export async function guestApi(path: string, init: RequestInit = {}) {
           maxReps: e.maxReps,
           restSeconds: e.defaultRestSeconds,
           measurementUnit: settings?.measurementUnit || "kg",
+          customName: settings?.customName || null,
+          lastWeight: settings?.lastWeight ?? null,
+          lastReps: settings?.lastReps ?? null,
+          lastRir: settings?.lastRir ?? null,
           sets: [],
         };
       }),
@@ -276,6 +287,18 @@ export async function guestApi(path: string, init: RequestInit = {}) {
       completedAt: new Date().toISOString(),
     };
     e.sets.push(row);
+    e.lastWeight = b.weight;
+    e.lastReps = b.reps;
+    e.lastRir = b.rir ?? null;
+    state.exerciseSettings[e.exercise.id] = {
+      ...(state.exerciseSettings[e.exercise.id] || {
+        plannedSets: e.plannedSets,
+        measurementUnit: e.measurementUnit,
+      }),
+      lastWeight: b.weight,
+      lastReps: b.reps,
+      lastRir: b.rir ?? null,
+    };
     save(state);
     return row;
   }
@@ -286,9 +309,12 @@ export async function guestApi(path: string, init: RequestInit = {}) {
     const settings = body(init);
     e.plannedSets = settings.plannedSets;
     e.measurementUnit = settings.measurementUnit;
+    e.customName = settings.customName || null;
     state.exerciseSettings[e.exercise.id] = {
+      ...state.exerciseSettings[e.exercise.id],
       plannedSets: settings.plannedSets,
       measurementUnit: settings.measurementUnit,
+      customName: settings.customName || null,
     };
     save(state);
     return session(s);

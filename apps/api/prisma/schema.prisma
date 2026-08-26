@@ -96,6 +96,10 @@ model WorkoutTemplateExercise {
   restSeconds     Int
   increment       Decimal         @db.Decimal(6, 2)
   measurementUnit String          @default("kg")
+  customName      String?
+  lastWeight      Decimal?        @db.Decimal(6, 2)
+  lastReps        Int?
+  lastRir         Int?
 
   @@unique([templateId, exerciseId])
 }
@@ -151,6 +155,10 @@ model WorkoutExercise {
   maxReps                 Int
   restSeconds             Int
   measurementUnit         String         @default("kg")
+  customName              String?
+  lastWeight              Decimal?       @db.Decimal(6, 2)
+  lastReps                Int?
+  lastRir                 Int?
   exerciseNameSnapshot    String
   machineSettingsSnapshot Json?
   sets                    WorkoutSet[]

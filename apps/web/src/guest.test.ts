@@ -56,12 +56,27 @@ describe("guest persistence", () => {
       `/workouts/${started.id}/exercises/${exercise.id}/settings`,
       {
         method: "PATCH",
-        body: JSON.stringify({ plannedSets: 4, measurementUnit: "units" }),
+        body: JSON.stringify({
+          plannedSets: 4,
+          measurementUnit: "units",
+          customName: "Тренажёр у окна",
+        }),
       },
     );
     expect(updated.exercises[0]).toMatchObject({
       plannedSets: 4,
       measurementUnit: "units",
+      customName: "Тренажёр у окна",
+    });
+    await guestApi(`/workouts/${started.id}/sets`, {
+      method: "POST",
+      body: JSON.stringify({
+        workoutExerciseId: exercise.id,
+        setNumber: 1,
+        weight: 17,
+        reps: 11,
+        rir: 2,
+      }),
     });
     await guestApi(`/workouts/${started.id}/finish`, { method: "POST" });
     const next: any = await guestApi("/workouts/start", {
@@ -71,6 +86,10 @@ describe("guest persistence", () => {
     expect(next.exercises[0]).toMatchObject({
       plannedSets: 4,
       measurementUnit: "units",
+      customName: "Тренажёр у окна",
+      lastWeight: 17,
+      lastReps: 11,
+      lastRir: 2,
     });
   });
   it("provides Russian interface messages", () => {

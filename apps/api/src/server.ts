@@ -571,6 +571,10 @@ app.post(
             maxReps: t.maxReps,
             restSeconds: t.restSeconds,
             measurementUnit: t.measurementUnit,
+            customName: t.customName,
+            lastWeight: t.lastWeight,
+            lastReps: t.lastReps,
+            lastRir: t.lastRir,
             exerciseNameSnapshot: t.exercise.nameEn,
             machineId: t.exercise.machines[0]?.id,
             machineSettingsSnapshot: t.exercise.machines[0]
@@ -607,19 +611,36 @@ app.post(
         sessionId: req.params.sessionId,
         session: { userId: userId(req), status: "active" },
       },
+      include: { session: true },
     });
-    const set = await prisma.workoutSet.upsert({
-      where: { clientMutationId: body.clientMutationId },
-      update: {},
-      create: {
-        workoutExerciseId: ex.id,
-        setNumber: body.setNumber,
-        weight: new Prisma.Decimal(body.weight),
-        reps: body.reps,
-        rir: body.rir,
-        clientMutationId: body.clientMutationId,
-      },
-    });
+    const weight = new Prisma.Decimal(body.weight);
+    const [set] = await prisma.$transaction([
+      prisma.workoutSet.upsert({
+        where: { clientMutationId: body.clientMutationId },
+        update: {},
+        create: {
+          workoutExerciseId: ex.id,
+          setNumber: body.setNumber,
+          weight,
+          reps: body.reps,
+          rir: body.rir,
+          clientMutationId: body.clientMutationId,
+        },
+      }),
+      prisma.workoutExercise.update({
+        where: { id: ex.id },
+        data: { lastWeight: weight, lastReps: body.reps, lastRir: body.rir },
+      }),
+      prisma.workoutTemplateExercise.update({
+        where: {
+          templateId_exerciseId: {
+            templateId: ex.session.templateId,
+            exerciseId: ex.exerciseId,
+          },
+        },
+        data: { lastWeight: weight, lastReps: body.reps, lastRir: body.rir },
+      }),
+    ]);
     res.status(201).json({ ...set, weight: num(set.weight) });
   }),
 );
@@ -631,6 +652,11 @@ app.patch(
       .object({
         plannedSets: z.number().int().min(1).max(20),
         measurementUnit: z.enum(["kg", "units"]),
+        customName: z
+          .string()
+          .trim()
+          .max(80)
+          .transform((value) => value || null),
       })
       .parse(req.body);
     const exercise = await prisma.workoutExercise.findFirstOrThrow({
@@ -656,6 +682,7 @@ app.patch(
         data: {
           sets: body.plannedSets,
           measurementUnit: body.measurementUnit,
+          customName: body.customName,
         },
       }),
     ]);
@@ -958,6 +985,7 @@ function serializeSession(s: any) {
     summary: sessionSummary(s),
     exercises: s.exercises.map((e: any) => ({
       ...e,
+      lastWeight: e.lastWeight === null ? null : num(e.lastWeight),
       exercise: serializeExercise(e.exercise),
       sets: e.sets.map((x: any) => ({ ...x, weight: num(x.weight) })),
       suggestIncrease: shouldSuggestIncrease(e.sets, e.plannedSets, e.maxReps),

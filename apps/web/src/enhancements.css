@@ -159,15 +159,41 @@
   backdrop-filter: blur(12px);
   touch-action: manipulation;
 }
-.image-lightbox > img {
+.image-lightbox-panel {
+  width: min(100%, 760px);
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: 0 18px 70px #000;
+}
+.image-lightbox-panel > img {
   display: block;
-  width: auto !important;
+  width: 100% !important;
   height: auto !important;
   max-width: 100% !important;
-  max-height: calc(100dvh - 32px) !important;
+  max-height: calc(100dvh - 210px) !important;
   object-fit: contain;
-  border-radius: 16px;
-  box-shadow: 0 18px 70px #000;
+  background: #050709;
+}
+.image-lightbox-content {
+  padding: 18px 20px 22px;
+  color: var(--text);
+}
+.image-lightbox-content h2,
+.image-lightbox-content h3 {
+  margin: 0 0 10px;
+}
+.image-lightbox-content h3 {
+  color: var(--accent);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.image-lightbox-content p {
+  margin: 8px 0;
+  color: var(--muted);
+  line-height: 1.5;
 }
 .lightbox-close {
   position: absolute;
@@ -256,6 +282,42 @@
 .exercise-title-row .exercise-title {
   min-width: 0;
 }
+.exercise-filter {
+  display: block;
+  margin: -3px 0 12px auto;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.exercise-filter.selected {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.workout-error {
+  margin: 0 0 12px;
+  font-size: 0.82rem;
+  text-align: center;
+}
+.workout-complete {
+  min-height: 55vh;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 18px;
+  color: var(--muted);
+  text-align: center;
+}
+.workout-complete svg {
+  width: 52px;
+  height: 52px;
+  color: var(--accent);
+}
+.workout-complete .primary {
+  width: min(100%, 360px);
+}
 .exercise-settings-button {
   width: 42px;
   min-width: 42px;
@@ -309,6 +371,54 @@
 }
 .settings-popup-title svg {
   width: 19px;
+}
+.settings-name {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.set-popup strong {
+  font-size: 1.25rem;
+  text-align: center;
+}
+.danger-button {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #ff6b6b66;
+  border-radius: 12px;
+  background: #ff6b6b18;
+  color: var(--danger);
+  font-weight: 800;
+}
+.danger-button svg {
+  width: 19px;
+}
+.inputs > * {
+  min-width: 0;
+}
+.number > div {
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 42px minmax(0, 1fr) minmax(0, auto) 42px;
+}
+.number button {
+  width: 42px;
+  padding: 0;
+}
+.number b {
+  white-space: nowrap;
+}
+.completed-sets button {
+  border: 0;
+  background: #223026;
+  color: #caff4a;
+  border-radius: 9px;
+  padding: 7px 9px;
+  font-size: 0.82rem;
 }
 .unit-picker {
   display: grid;

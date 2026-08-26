@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { flush, queue } from "./offline";
+import { discardWorkoutFinishes, flush, queue } from "./offline";
 
 const values = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", {
@@ -18,7 +18,7 @@ describe("offline mutation queue", () => {
     });
   });
 
-  it("sends queued sets before finishing the workout", async () => {
+  it("discards delayed finishes while keeping queued sets", async () => {
     queue({ id: "set", path: "/workouts/1/sets", init: { method: "POST" } });
     queue({
       id: "finish",
@@ -26,11 +26,11 @@ describe("offline mutation queue", () => {
       init: { method: "POST" },
     });
     const sender = vi.fn().mockResolvedValue({});
+    discardWorkoutFinishes();
 
     await expect(flush(sender)).resolves.toBe(true);
     expect(sender.mock.calls.map(([path]) => path)).toEqual([
       "/workouts/1/sets",
-      "/workouts/1/finish",
     ]);
   });
 

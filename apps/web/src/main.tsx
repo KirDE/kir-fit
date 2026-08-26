@@ -23,7 +23,7 @@ import {
 } from "recharts";
 import { api, isGuest, setGuest, setToken, token, uuid } from "./api";
 import { startRegistration, startAuthentication } from "@simplewebauthn/browser";
-import { flush, queue } from "./offline";
+import { discardWorkoutFinishes, flush, queue } from "./offline";
 import { getLanguage, setLanguage, tr } from "./i18n";
 import type { Exercise, Session, WorkoutExercise } from "./types";
 import "./styles.css";
@@ -120,6 +120,7 @@ function App() {
   const [view, setView] = useState<View>("home");
   const [online, setOnline] = useState(navigator.onLine);
   useEffect(() => {
+    discardWorkoutFinishes();
     const f = () => {
       setOnline(navigator.onLine);
       if (navigator.onLine && !isGuest()) flush(api);
@@ -543,20 +544,20 @@ function Workout({ done }: { done: () => void }) {
   const [s, setS] = useState<Session | null | undefined>(),
     [index, setIndex] = useState(0),
     [rest, setRest] = useState<number | null>(null),
-    [undo, setUndo] = useState<any>(),
-    [finishing, setFinishing] = useState(false);
+    [showCompleted, setShowCompleted] = useState(false),
+    [finishing, setFinishing] = useState(false),
+    [finishError, setFinishError] = useState("");
   useEffect(() => {
     api("/workouts/active").then(async (active) => {
       if (active) setS(active);
       else {
-        const d = await api("/dashboard");
+        const dashboard = await api("/dashboard");
         setS(
           await api("/workouts/start", {
             method: "POST",
             body: JSON.stringify({
-              templateId: d.template.id,
+              templateId: dashboard.template.id,
               clientMutationId: uuid(),
-              introWeeks: true,
             }),
           }),
         );
@@ -565,11 +566,11 @@ function Workout({ done }: { done: () => void }) {
   }, []);
   useEffect(() => {
     if (rest === null) return;
-    const id = setInterval(
-      () => setRest((r) => (r === null ? null : Math.max(0, r - 1))),
+    const timer = setInterval(
+      () => setRest((value) => (value === null ? null : Math.max(0, value - 1))),
       1000,
     );
-    return () => clearInterval(id);
+    return () => clearInterval(timer);
   }, [rest]);
   useEffect(() => {
     if (rest === 0) {
@@ -577,12 +578,45 @@ function Workout({ done }: { done: () => void }) {
       setRest(null);
     }
   }, [rest]);
+  useEffect(() => {
+    if (!s) return;
+    const count = showCompleted
+      ? s.exercises.length
+      : s.exercises.filter((exercise) => exercise.sets.length < exercise.plannedSets)
+          .length;
+    if (index >= count) setIndex(Math.max(0, count - 1));
+  }, [index, s, showCompleted]);
   if (s === undefined) return <Loading />;
   if (!s) return <p>{tr("startError")}</p>;
-  const ex = s.exercises[index];
-  const complete = ex.sets.length >= ex.plannedSets;
+
+  const completedCount = s.exercises.filter(
+    (exercise) => exercise.sets.length >= exercise.plannedSets,
+  ).length;
+  const visibleExercises = showCompleted
+    ? s.exercises
+    : s.exercises.filter(
+        (exercise) => exercise.sets.length < exercise.plannedSets,
+      );
+  const currentIndex = Math.min(index, Math.max(0, visibleExercises.length - 1));
+  const ex = visibleExercises[currentIndex];
   const reload = () => api("/workouts/active").then(setS);
+  const finish = async () => {
+    if (finishing) return;
+    setFinishing(true);
+    setFinishError("");
+    const path = `/workouts/${s.id}/finish`;
+    const init = { method: "POST", body: "{}" };
+    try {
+      if (!isGuest() && !(await flush(api))) throw new Error("pending sets");
+      await api(path, init);
+      done();
+    } catch {
+      setFinishError(tr("finishError"));
+      setFinishing(false);
+    }
+  };
   const save = async (data: any) => {
+    if (!ex) return;
     const mutation = uuid();
     const payload = {
       ...data,
@@ -591,11 +625,10 @@ function Workout({ done }: { done: () => void }) {
       clientMutationId: mutation,
     };
     try {
-      const row = await api(`/workouts/${s.id}/sets`, {
+      await api(`/workouts/${s.id}/sets`, {
         method: "POST",
         body: JSON.stringify(payload),
       });
-      setUndo({ session: s.id, set: row.id });
       await reload();
     } catch {
       queue({
@@ -606,44 +639,33 @@ function Workout({ done }: { done: () => void }) {
       await reload().catch(() => {});
     }
     setRest(ex.restSeconds);
-    if (ex.sets.length + 1 >= ex.plannedSets && index < s.exercises.length - 1)
-      setIndex(index + 1);
-  };
-  const finish = async () => {
-    if (finishing) return;
-    setFinishing(true);
-    const path = `/workouts/${s.id}/finish`;
-    const init = { method: "POST", body: "{}" };
-    try {
-      if (!isGuest() && !(await flush(api))) {
-        queue({ id: uuid(), path, init });
-      } else {
-        await api(path, init);
-      }
-    } catch {
-      if (!isGuest()) queue({ id: uuid(), path, init });
-    }
-    done();
   };
   const updateSettings = async (settings: {
     plannedSets: number;
     measurementUnit: "kg" | "units";
+    customName: string;
   }) => {
+    if (!ex) return;
     const updated = await api(
       `/workouts/${s.id}/exercises/${ex.id}/settings`,
       { method: "PATCH", body: JSON.stringify(settings) },
     );
     setS(updated);
   };
+  const deleteSet = async (setId: string) => {
+    await api(`/workouts/${s.id}/sets/${setId}`, { method: "DELETE" });
+    await reload();
+  };
+
   return (
     <section className="workout">
       <div className="workout-top">
-        <button className="icon" onClick={finish} disabled={finishing}>
+        <button className="icon" onClick={done}>
           <X />
         </button>
         <div>
           <b>
-            {index + 1} / {s.exercises.length}
+            {completedCount} / {s.exercises.length} {tr("completed")}
           </b>
           <small>Full Body</small>
         </div>
@@ -653,50 +675,61 @@ function Workout({ done }: { done: () => void }) {
         </span>
       </div>
       <div className="progressbar">
-        <i
-          style={{
-            width: `${((index + (complete ? 1 : 0)) / s.exercises.length) * 100}%`,
-          }}
-        />
+        <i style={{ width: `${(completedCount / s.exercises.length) * 100}%` }} />
       </div>
+      <button
+        type="button"
+        className={`exercise-filter${showCompleted ? " selected" : ""}`}
+        onClick={() => {
+          setIndex(0);
+          setShowCompleted((value) => !value);
+        }}
+      >
+        {showCompleted ? tr("hideCompleted") : tr("showAllExercises")}
+      </button>
+      {finishError && <p className="error workout-error">{finishError}</p>}
       {rest !== null && (
         <RestTimer
           seconds={rest}
-          change={(n) => setRest(Math.max(0, rest + n))}
+          change={(change) => setRest(Math.max(0, rest + change))}
           skip={() => setRest(null)}
         />
       )}
-      <ExerciseCard ex={ex} save={save} updateSettings={updateSettings} />
-      {undo && (
-        <button
-          className="undo"
-          onClick={async () => {
-            await api(`/workouts/${undo.session}/sets/${undo.set}`, {
-              method: "DELETE",
-            });
-            setUndo(null);
-            await reload();
-          }}
-        >
-          <Undo2 /> {tr("undo")}
-        </button>
-      )}
-      <div className="exercise-nav">
-        <button disabled={index === 0} onClick={() => setIndex(index - 1)}>
-          {tr("previous")}
-        </button>
-        {index < s.exercises.length - 1 ? (
-          <button onClick={() => setIndex(index + 1)}>
-            {tr("nextExercise")}
-          </button>
-        ) : (
-          complete && (
-            <button className="primary" onClick={finish} disabled={finishing}>
-              {tr("finish")}
+      {ex ? (
+        <>
+          <ExerciseCard
+            ex={ex}
+            save={save}
+            deleteSet={deleteSet}
+            updateSettings={updateSettings}
+          />
+          <div className="exercise-nav">
+            <button
+              disabled={currentIndex === 0}
+              onClick={() => setIndex(currentIndex - 1)}
+            >
+              {tr("previous")}
             </button>
-          )
-        )}
-      </div>
+            {currentIndex < visibleExercises.length - 1 ? (
+              <button onClick={() => setIndex(currentIndex + 1)}>
+                {tr("nextExercise")}
+              </button>
+            ) : completedCount === s.exercises.length ? (
+              <button className="primary" onClick={finish} disabled={finishing}>
+                {tr("finish")}
+              </button>
+            ) : null}
+          </div>
+        </>
+      ) : (
+        <div className="workout-complete">
+          <Dumbbell />
+          <b>{tr("allExercisesCompleted")}</b>
+          <button className="primary" onClick={finish} disabled={finishing}>
+            {tr("finish")}
+          </button>
+        </div>
+      )}
     </section>
   );
 }
@@ -704,10 +737,12 @@ function ZoomableImage({
   src,
   alt,
   compact = false,
+  expandedContent,
 }: {
   src: string;
   alt: string;
   compact?: boolean;
+  expandedContent?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -752,11 +787,15 @@ function ZoomableImage({
           >
             <X />
           </button>
-          <img
-            src={src}
-            alt={alt}
+          <div
+            className="image-lightbox-panel"
             onClick={(event) => event.stopPropagation()}
-          />
+          >
+            <img src={src} alt={alt} />
+            {expandedContent && (
+              <div className="image-lightbox-content">{expandedContent}</div>
+            )}
+          </div>
         </div>
       )}
     </>
@@ -765,36 +804,55 @@ function ZoomableImage({
 function ExerciseCard({
   ex,
   save,
+  deleteSet,
   updateSettings,
 }: {
   ex: WorkoutExercise;
   save: (v: any) => void;
+  deleteSet: (setId: string) => Promise<void>;
   updateSettings: (v: {
     plannedSets: number;
     measurementUnit: "kg" | "units";
+    customName: string;
   }) => Promise<void>;
 }) {
-  const last: any = null;
   const [weight, setWeight] = useState<number | "">(
-      last?.weight || ex.sets.at(-1)?.weight || "",
+      ex.sets.at(-1)?.weight ?? ex.lastWeight ?? "",
     ),
-    [reps, setReps] = useState(ex.minReps),
-    [rir, setRir] = useState<number | null>(null),
+    [reps, setReps] = useState(
+      ex.sets.at(-1)?.reps ?? ex.lastReps ?? ex.minReps,
+    ),
+    [rir, setRir] = useState<number | null>(
+      ex.sets.at(-1)?.rir ?? ex.lastRir ?? null,
+    ),
     [settingsOpen, setSettingsOpen] = useState(false),
     [plannedSets, setPlannedSets] = useState(ex.plannedSets),
     [measurementUnit, setMeasurementUnit] = useState(ex.measurementUnit),
-    [settingsBusy, setSettingsBusy] = useState(false);
+    [customName, setCustomName] = useState(ex.customName || ""),
+    [settingsBusy, setSettingsBusy] = useState(false),
+    [selectedSet, setSelectedSet] = useState<any>();
   useEffect(() => {
-    setWeight(ex.sets.at(-1)?.weight || "");
-    setReps(ex.minReps);
+    setWeight(ex.sets.at(-1)?.weight ?? ex.lastWeight ?? "");
+    setReps(ex.sets.at(-1)?.reps ?? ex.lastReps ?? ex.minReps);
+    setRir(ex.sets.at(-1)?.rir ?? ex.lastRir ?? null);
     setPlannedSets(ex.plannedSets);
     setMeasurementUnit(ex.measurementUnit);
+    setCustomName(ex.customName || "");
+    setSelectedSet(undefined);
   }, [ex.id]);
   return (
     <div className="exercise-card">
       <ZoomableImage
         src={ex.exercise.images[0]?.path || "/icon.svg"}
-        alt={ex.exercise.nameEn}
+        alt={ex.customName || localizedName(ex.exercise)}
+        expandedContent={
+          <>
+            <h2>{ex.customName || localizedName(ex.exercise)}</h2>
+            <h3>{tr("technique")}</h3>
+            <p>{localizedDescription(ex.exercise)}</p>
+            <p>{localizedInstructions(ex.exercise)}</p>
+          </>
+        }
       />
       <div className="exercise-title-row">
         <div className="exercise-title">
@@ -805,9 +863,13 @@ function ExerciseCard({
               : ex.sets.length + 1}{" "}
             / {ex.plannedSets} {tr("sets")}
           </p>
-          <h1>{localizedName(ex.exercise)}</h1>
+          <h1>{ex.customName || localizedName(ex.exercise)}</h1>
           <h2>
-            {getLanguage() === "en" ? ex.exercise.nameDe : ex.exercise.nameEn}
+            {ex.customName
+              ? localizedName(ex.exercise)
+              : getLanguage() === "en"
+                ? ex.exercise.nameDe
+                : ex.exercise.nameEn}
           </h2>
         </div>
         <button
@@ -831,7 +893,11 @@ function ExerciseCard({
               event.preventDefault();
               setSettingsBusy(true);
               try {
-                await updateSettings({ plannedSets, measurementUnit });
+                await updateSettings({
+                  plannedSets,
+                  measurementUnit,
+                  customName,
+                });
                 setSettingsOpen(false);
               } finally {
                 setSettingsBusy(false);
@@ -844,6 +910,15 @@ function ExerciseCard({
                 <X />
               </button>
             </div>
+            <label className="settings-name">
+              <span>{tr("exerciseName")}</span>
+              <input
+                value={customName}
+                maxLength={80}
+                placeholder={localizedName(ex.exercise)}
+                onChange={(event) => setCustomName(event.target.value)}
+              />
+            </label>
             <NumberStep
               label={tr("setCount")}
               value={plannedSets}
@@ -877,19 +952,46 @@ function ExerciseCard({
           {ex.machine.backrestSetting || "—"}
         </div>
       )}
-      <details>
-        <summary>{tr("technique")}</summary>
-        <p>{localizedDescription(ex.exercise)}</p>
-        <p>{localizedInstructions(ex.exercise)}</p>
-      </details>
       {ex.sets.length > 0 && (
         <div className="completed-sets">
-          {ex.sets.map((s) => (
-            <span key={s.id}>
-              ✓ {s.weight} {tr(ex.measurementUnit)} × {s.reps}
-              {s.rir !== null ? ` · RIR ${s.rir}` : ""}
-            </span>
+          {ex.sets.map((set) => (
+            <button key={set.id} onClick={() => setSelectedSet(set)}>
+              ✓ {set.weight} {tr(ex.measurementUnit)} × {set.reps}
+              {set.rir !== null ? ` · RIR ${set.rir}` : ""}
+            </button>
           ))}
+        </div>
+      )}
+      {selectedSet && (
+        <div
+          className="settings-popup-backdrop"
+          onClick={() => setSelectedSet(undefined)}
+        >
+          <div
+            className="settings-popup set-popup"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="settings-popup-title">
+              <b>{tr("recordedSet")}</b>
+              <button type="button" onClick={() => setSelectedSet(undefined)}>
+                <X />
+              </button>
+            </div>
+            <strong>
+              {selectedSet.weight} {tr(ex.measurementUnit)} × {selectedSet.reps}
+              {selectedSet.rir !== null ? ` · RIR ${selectedSet.rir}` : ""}
+            </strong>
+            <button
+              type="button"
+              className="danger-button"
+              onClick={async () => {
+                await deleteSet(selectedSet.id);
+                setSelectedSet(undefined);
+              }}
+            >
+              <Undo2 /> {tr("undo")}
+            </button>
+          </div>
         </div>
       )}
       <div className="inputs">
@@ -958,6 +1060,7 @@ function NumberStep({
       <span>{label}</span>
       <div>
         <button
+          type="button"
           onClick={() =>
             set(Math.max(0, +(Number(value || 0) - step).toFixed(2)))
           }
@@ -973,7 +1076,10 @@ function NumberStep({
           }
         />
         {suffix && <b>{suffix}</b>}
-        <button onClick={() => set(+(Number(value || 0) + step).toFixed(2))}>
+        <button
+          type="button"
+          onClick={() => set(+(Number(value || 0) + step).toFixed(2))}
+        >
           +
         </button>
       </div>
@@ -1033,7 +1139,7 @@ function History() {
               .filter((e) => e.sets.length)
               .map((e) => (
                 <div className="history-ex" key={e.id}>
-                  <b>{localizedName(e.exercise)}</b>
+                  <b>{e.customName || localizedName(e.exercise)}</b>
                   <span>
                     {e.sets
                       .map(
