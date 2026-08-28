@@ -1087,13 +1087,7 @@ function ExerciseCard({
           }
           suffix={tr(ex.measurementUnit)}
         />
-        <NumberStep
-          className="reps-step"
-          label={tr("reps")}
-          value={reps}
-          set={setReps}
-          step={1}
-        />
+        <NumberStep label={tr("reps")} value={reps} set={setReps} step={1} />
       </div>
       <div className="rir">
         <span>
@@ -1126,14 +1120,12 @@ function ExerciseCard({
   );
 }
 function NumberStep({
-  className,
   label,
   value,
   set,
   step,
   suffix,
 }: {
-  className?: string;
   label: string;
   value: number | "";
   set: (v: any) => void;
@@ -1141,7 +1133,7 @@ function NumberStep({
   suffix?: string;
 }) {
   return (
-    <label className={`number ${className || ""}`.trim()}>
+    <label className="number">
       <span>{label}</span>
       <div>
         <button

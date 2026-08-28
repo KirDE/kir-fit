@@ -437,10 +437,6 @@
 .number b {
   white-space: nowrap;
 }
-.reps-step > div,
-.settings-popup .number > div {
-  padding-right: 7px;
-}
 .completed-sets button {
   border: 0;
   background: #223026;
