@@ -1,5 +1,13 @@
 type Pending = { id: string; path: string; init: RequestInit };
 const store = "kirfit_pending";
+
+export type RestTimerState = { startedAt: number; durationSeconds: number };
+export function remainingRestSeconds(timer: RestTimerState, now = Date.now()) {
+  return Math.max(
+    0,
+    Math.ceil(timer.durationSeconds - (now - timer.startedAt) / 1000),
+  );
+}
 const read = (): Pending[] => JSON.parse(localStorage.getItem(store) || "[]");
 export function queue(item: Pending) {
   const q = read();

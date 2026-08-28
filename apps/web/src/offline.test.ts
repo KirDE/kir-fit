@@ -4,6 +4,7 @@ import {
   discardWorkoutFinishes,
   flush,
   queue,
+  remainingRestSeconds,
 } from "./offline";
 
 const values = new Map<string, string>();
@@ -12,6 +13,14 @@ Object.defineProperty(globalThis, "localStorage", {
     getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => values.set(key, value),
   },
+});
+
+describe("rest timer", () => {
+  it("uses elapsed wall-clock time after the app was suspended", () => {
+    const timer = { startedAt: 1_000_000, durationSeconds: 120 };
+    expect(remainingRestSeconds(timer, 1_045_100)).toBe(75);
+    expect(remainingRestSeconds(timer, 1_121_000)).toBe(0);
+  });
 });
 
 describe("offline mutation queue", () => {

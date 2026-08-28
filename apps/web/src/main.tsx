@@ -36,6 +36,8 @@ import {
   discardWorkoutFinishes,
   flush,
   queue,
+  remainingRestSeconds,
+  type RestTimerState,
 } from "./offline";
 import { getLanguage, setLanguage, tr } from "./i18n";
 import type { Exercise, Session, WorkoutExercise } from "./types";
@@ -562,7 +564,7 @@ function Workout({ done }: { done: () => void }) {
   const workoutMenuRef = useRef<HTMLDetailsElement>(null);
   const [s, setS] = useState<Session | null | undefined>(),
     [index, setIndex] = useState(0),
-    [restEndsAt, setRestEndsAt] = useState<number | null>(null),
+    [restTimer, setRestTimer] = useState<RestTimerState | null>(null),
     [clockNow, setClockNow] = useState(() => Date.now()),
     [showCompleted, setShowCompleted] = useState(false),
     [finishing, setFinishing] = useState(false),
@@ -590,34 +592,58 @@ function Workout({ done }: { done: () => void }) {
     });
   }, []);
   useEffect(() => {
-    if (restEndsAt === null) return;
+    if (restTimer === null) return;
     const syncClock = () => {
       const now = Date.now();
       setClockNow(now);
-      if (now >= restEndsAt) {
+      if (remainingRestSeconds(restTimer, now) === 0) {
         navigator.vibrate?.([250, 120, 250]);
         if (s) localStorage.removeItem(`kirfit_rest_${s.id}`);
-        setRestEndsAt(null);
+        setRestTimer(null);
       }
     };
     syncClock();
     const timer = setInterval(syncClock, 1000);
     document.addEventListener("visibilitychange", syncClock);
+    document.addEventListener("resume", syncClock);
     window.addEventListener("focus", syncClock);
+    window.addEventListener("pageshow", syncClock);
+    window.addEventListener("pointerdown", syncClock, { passive: true });
     return () => {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", syncClock);
+      document.removeEventListener("resume", syncClock);
       window.removeEventListener("focus", syncClock);
+      window.removeEventListener("pageshow", syncClock);
+      window.removeEventListener("pointerdown", syncClock);
     };
-  }, [restEndsAt, s?.id]);
+  }, [restTimer, s?.id]);
   useEffect(() => {
     if (!s) return;
-    const stored = Number(localStorage.getItem(`kirfit_rest_${s.id}`));
-    if (stored > Date.now()) {
-      setRestEndsAt(stored);
+    const key = `kirfit_rest_${s.id}`;
+    const stored = localStorage.getItem(key);
+    if (!stored) return;
+    let restored: RestTimerState | null = null;
+    try {
+      const parsed = JSON.parse(stored);
+      if (
+        Number.isFinite(parsed.startedAt) &&
+        Number.isFinite(parsed.durationSeconds)
+      )
+        restored = parsed;
+    } catch {
+      const legacyDeadline = Number(stored);
+      if (legacyDeadline > Date.now())
+        restored = {
+          startedAt: Date.now(),
+          durationSeconds: (legacyDeadline - Date.now()) / 1000,
+        };
+    }
+    if (restored && remainingRestSeconds(restored) > 0) {
+      setRestTimer(restored);
       setClockNow(Date.now());
     } else {
-      localStorage.removeItem(`kirfit_rest_${s.id}`);
+      localStorage.removeItem(key);
     }
   }, [s?.id]);
   useEffect(() => {
@@ -633,22 +659,20 @@ function Workout({ done }: { done: () => void }) {
   if (!s) return <p>{tr("startError")}</p>;
 
   const rest =
-    restEndsAt === null
-      ? null
-      : Math.max(0, Math.ceil((restEndsAt - clockNow) / 1000));
+    restTimer === null ? null : remainingRestSeconds(restTimer, clockNow);
   const clearRest = () => {
     localStorage.removeItem(`kirfit_rest_${s.id}`);
-    setRestEndsAt(null);
+    setRestTimer(null);
   };
   const setRestSeconds = (seconds: number) => {
     if (seconds <= 0) {
       clearRest();
       return;
     }
-    const deadline = Date.now() + seconds * 1000;
-    localStorage.setItem(`kirfit_rest_${s.id}`, String(deadline));
-    setClockNow(Date.now());
-    setRestEndsAt(deadline);
+    const nextTimer = { startedAt: Date.now(), durationSeconds: seconds };
+    localStorage.setItem(`kirfit_rest_${s.id}`, JSON.stringify(nextTimer));
+    setClockNow(nextTimer.startedAt);
+    setRestTimer(nextTimer);
   };
   const completedCount = s.exercises.filter(
     (exercise) => exercise.sets.length >= exercise.plannedSets,
