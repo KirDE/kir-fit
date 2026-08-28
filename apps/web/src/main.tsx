@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Dumbbell,
+  Eye,
+  EyeOff,
   History as HistoryIcon,
   House,
   LineChart as ChartIcon,
@@ -557,6 +559,7 @@ function Dashboard({
   );
 }
 function Workout({ done }: { done: () => void }) {
+  const workoutMenuRef = useRef<HTMLDetailsElement>(null);
   const [s, setS] = useState<Session | null | undefined>(),
     [index, setIndex] = useState(0),
     [rest, setRest] = useState<number | null>(null),
@@ -730,11 +733,22 @@ function Workout({ done }: { done: () => void }) {
           {Math.floor((Date.now() - new Date(s.startedAt).getTime()) / 60000)}{" "}
           min
         </span>
-        <details className="workout-menu">
+        <details ref={workoutMenuRef} className="workout-menu">
           <summary aria-label={tr("workoutMenu")}>
             <EllipsisVertical />
           </summary>
           <div>
+            <button
+              type="button"
+              onClick={() => {
+                setIndex(0);
+                setShowCompleted((value) => !value);
+                workoutMenuRef.current?.removeAttribute("open");
+              }}
+            >
+              {showCompleted ? <EyeOff /> : <Eye />}{" "}
+              {showCompleted ? tr("hideCompleted") : tr("showAllExercises")}
+            </button>
             <button type="button" onClick={() => setWorkoutAction("restart")}>
               <RotateCcw /> {tr("restartWorkout")}
             </button>
@@ -753,16 +767,6 @@ function Workout({ done }: { done: () => void }) {
           style={{ width: `${(completedCount / s.exercises.length) * 100}%` }}
         />
       </div>
-      <button
-        type="button"
-        className={`exercise-filter${showCompleted ? " selected" : ""}`}
-        onClick={() => {
-          setIndex(0);
-          setShowCompleted((value) => !value);
-        }}
-      >
-        {showCompleted ? tr("hideCompleted") : tr("showAllExercises")}
-      </button>
       {finishError && <p className="error workout-error">{finishError}</p>}
       {rest !== null && (
         <RestTimer
