@@ -562,7 +562,8 @@ function Workout({ done }: { done: () => void }) {
   const workoutMenuRef = useRef<HTMLDetailsElement>(null);
   const [s, setS] = useState<Session | null | undefined>(),
     [index, setIndex] = useState(0),
-    [rest, setRest] = useState<number | null>(null),
+    [restEndsAt, setRestEndsAt] = useState<number | null>(null),
+    [clockNow, setClockNow] = useState(() => Date.now()),
     [showCompleted, setShowCompleted] = useState(false),
     [finishing, setFinishing] = useState(false),
     [finishConfirmOpen, setFinishConfirmOpen] = useState(false),
@@ -589,20 +590,36 @@ function Workout({ done }: { done: () => void }) {
     });
   }, []);
   useEffect(() => {
-    if (rest === null) return;
-    const timer = setInterval(
-      () =>
-        setRest((value) => (value === null ? null : Math.max(0, value - 1))),
-      1000,
-    );
-    return () => clearInterval(timer);
-  }, [rest]);
+    if (restEndsAt === null) return;
+    const syncClock = () => {
+      const now = Date.now();
+      setClockNow(now);
+      if (now >= restEndsAt) {
+        navigator.vibrate?.([250, 120, 250]);
+        if (s) localStorage.removeItem(`kirfit_rest_${s.id}`);
+        setRestEndsAt(null);
+      }
+    };
+    syncClock();
+    const timer = setInterval(syncClock, 1000);
+    document.addEventListener("visibilitychange", syncClock);
+    window.addEventListener("focus", syncClock);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", syncClock);
+      window.removeEventListener("focus", syncClock);
+    };
+  }, [restEndsAt, s?.id]);
   useEffect(() => {
-    if (rest === 0) {
-      navigator.vibrate?.([250, 120, 250]);
-      setRest(null);
+    if (!s) return;
+    const stored = Number(localStorage.getItem(`kirfit_rest_${s.id}`));
+    if (stored > Date.now()) {
+      setRestEndsAt(stored);
+      setClockNow(Date.now());
+    } else {
+      localStorage.removeItem(`kirfit_rest_${s.id}`);
     }
-  }, [rest]);
+  }, [s?.id]);
   useEffect(() => {
     if (!s) return;
     const count = showCompleted
@@ -615,6 +632,24 @@ function Workout({ done }: { done: () => void }) {
   if (s === undefined) return <Loading />;
   if (!s) return <p>{tr("startError")}</p>;
 
+  const rest =
+    restEndsAt === null
+      ? null
+      : Math.max(0, Math.ceil((restEndsAt - clockNow) / 1000));
+  const clearRest = () => {
+    localStorage.removeItem(`kirfit_rest_${s.id}`);
+    setRestEndsAt(null);
+  };
+  const setRestSeconds = (seconds: number) => {
+    if (seconds <= 0) {
+      clearRest();
+      return;
+    }
+    const deadline = Date.now() + seconds * 1000;
+    localStorage.setItem(`kirfit_rest_${s.id}`, String(deadline));
+    setClockNow(Date.now());
+    setRestEndsAt(deadline);
+  };
   const completedCount = s.exercises.filter(
     (exercise) => exercise.sets.length >= exercise.plannedSets,
   ).length;
@@ -638,6 +673,7 @@ function Workout({ done }: { done: () => void }) {
     try {
       if (!isGuest() && !(await flush(api))) throw new Error("pending sets");
       await api(path, init);
+      clearRest();
       done();
     } catch {
       setFinishError(tr("finishError"));
@@ -652,7 +688,7 @@ function Workout({ done }: { done: () => void }) {
     try {
       await api(`/workouts/${s.id}/active`, { method: "DELETE" });
       discardWorkout(s.id);
-      setRest(null);
+      clearRest();
       if (action === "cancel") {
         done();
         return;
@@ -698,7 +734,7 @@ function Workout({ done }: { done: () => void }) {
       });
       await reload().catch(() => {});
     }
-    setRest(ex.restSeconds);
+    setRestSeconds(ex.restSeconds);
   };
   const updateSettings = async (settings: {
     plannedSets: number;
@@ -774,8 +810,8 @@ function Workout({ done }: { done: () => void }) {
       {rest !== null && (
         <RestTimer
           seconds={rest}
-          change={(change) => setRest(Math.max(0, rest + change))}
-          skip={() => setRest(null)}
+          change={(change) => setRestSeconds(Math.max(0, rest + change))}
+          skip={clearRest}
         />
       )}
       {ex ? (
