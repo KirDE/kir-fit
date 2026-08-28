@@ -13,7 +13,12 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { z } from "zod";
-import { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } from "@simplewebauthn/server";
+import {
+  generateRegistrationOptions,
+  verifyRegistrationResponse,
+  generateAuthenticationOptions,
+  verifyAuthenticationResponse,
+} from "@simplewebauthn/server";
 import { nextWorkoutDay, shouldSuggestIncrease, volume } from "./domain.js";
 
 const prisma = new PrismaClient();
@@ -152,7 +157,6 @@ app.post(
   }),
 );
 
-
 app.post(
   "/api/auth/webauthn/register-options",
   rateLimit({ windowMs: 15 * 60_000, limit: 10 }),
@@ -193,10 +197,7 @@ app.post(
     const body = z
       .object({ ceremonyId: z.string().min(1), response: z.unknown() })
       .parse(req.body);
-    const ceremony = await consumePasskeyChallenge(
-      body.ceremonyId,
-      "register",
-    );
+    const ceremony = await consumePasskeyChallenge(body.ceremonyId, "register");
     if (!ceremony.userHandle)
       return res.status(400).json({ error: "Invalid registration state" });
     const registrationResponse = body.response as any;
@@ -797,6 +798,20 @@ app.post(
       include: sessionInclude,
     });
     res.json(serializeSession(resumed));
+  }),
+);
+app.delete(
+  "/api/workouts/:id/active",
+  auth,
+  asyncRoute(async (req, res) => {
+    await prisma.workoutSession.delete({
+      where: {
+        id: req.params.id,
+        userId: userId(req),
+        status: "active",
+      },
+    });
+    res.status(204).end();
   }),
 );
 app.delete(

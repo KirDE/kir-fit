@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { discardWorkoutFinishes, flush, queue } from "./offline";
+import {
+  discardWorkout,
+  discardWorkoutFinishes,
+  flush,
+  queue,
+} from "./offline";
 
 const values = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", {
@@ -31,6 +36,18 @@ describe("offline mutation queue", () => {
     await expect(flush(sender)).resolves.toBe(true);
     expect(sender.mock.calls.map(([path]) => path)).toEqual([
       "/workouts/1/sets",
+    ]);
+  });
+
+  it("discards only mutations for the canceled workout", async () => {
+    queue({ id: "old", path: "/workouts/old/sets", init: { method: "POST" } });
+    queue({ id: "new", path: "/workouts/new/sets", init: { method: "POST" } });
+    discardWorkout("old");
+    const sender = vi.fn().mockResolvedValue({});
+
+    await expect(flush(sender)).resolves.toBe(true);
+    expect(sender.mock.calls.map(([path]) => path)).toEqual([
+      "/workouts/new/sets",
     ]);
   });
 

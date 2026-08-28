@@ -355,6 +355,16 @@ export async function guestApi(path: string, init: RequestInit = {}) {
     save(state);
     return session(s);
   }
+  m = path.match(/^\/workouts\/([^/]+)\/active$/);
+  if (m && method === "DELETE") {
+    const index = state.sessions.findIndex(
+      (session) => session.id === m![1] && session.status === "active",
+    );
+    if (index < 0) throw new Error("Active workout not found");
+    state.sessions.splice(index, 1);
+    save(state);
+    return null;
+  }
   m = path.match(/^\/workouts\/([^/]+)$/);
   if (m && method === "DELETE") {
     const index = state.sessions.findIndex(

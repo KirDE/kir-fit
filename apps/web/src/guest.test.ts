@@ -116,6 +116,16 @@ describe("guest persistence", () => {
     await guestApi(`/workouts/${started.id}`, { method: "DELETE" });
     expect(await guestApi("/history")).toEqual([]);
   });
+  it("cancels an active workout so a fresh one can start", async () => {
+    const started: any = await guestApi("/workouts/start", { method: "POST" });
+    await guestApi(`/workouts/${started.id}/active`, { method: "DELETE" });
+    expect(await guestApi("/workouts/active")).toBeNull();
+    const restarted: any = await guestApi("/workouts/start", {
+      method: "POST",
+    });
+    expect(restarted.id).not.toBe(started.id);
+  });
+
   it("provides Russian interface messages", () => {
     localStorage.setItem("kirfit_language", "ru");
     expect(tr("startWorkout")).toBe("Начать тренировку");

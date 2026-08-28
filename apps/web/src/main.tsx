@@ -6,9 +6,12 @@ import {
   House,
   LineChart as ChartIcon,
   Plus,
+  EllipsisVertical,
+  RotateCcw,
   Settings,
   Scale,
   SlidersHorizontal,
+  Trash2,
   Undo2,
   WifiOff,
   X,
@@ -22,8 +25,16 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { api, isGuest, setGuest, setToken, token, uuid } from "./api";
-import { startRegistration, startAuthentication } from "@simplewebauthn/browser";
-import { discardWorkoutFinishes, flush, queue } from "./offline";
+import {
+  startRegistration,
+  startAuthentication,
+} from "@simplewebauthn/browser";
+import {
+  discardWorkout,
+  discardWorkoutFinishes,
+  flush,
+  queue,
+} from "./offline";
 import { getLanguage, setLanguage, tr } from "./i18n";
 import type { Exercise, Session, WorkoutExercise } from "./types";
 import "./styles.css";
@@ -42,27 +53,28 @@ const dayNames = [
 ];
 const localizedWeekdays = () => {
   const lang = getLanguage();
-  const names = lang === "de"
-    ? [
-        "Sonntag",
-        "Montag",
-        "Dienstag",
-        "Mittwoch",
-        "Donnerstag",
-        "Freitag",
-        "Samstag",
-      ]
-    : lang === "ru"
+  const names =
+    lang === "de"
       ? [
-          "Воскресенье",
-          "Понедельник",
-          "Вторник",
-          "Среда",
-          "Четверг",
-          "Пятница",
-          "Суббота",
+          "Sonntag",
+          "Montag",
+          "Dienstag",
+          "Mittwoch",
+          "Donnerstag",
+          "Freitag",
+          "Samstag",
         ]
-      : dayNames;
+      : lang === "ru"
+        ? [
+            "Воскресенье",
+            "Понедельник",
+            "Вторник",
+            "Среда",
+            "Четверг",
+            "Пятница",
+            "Суббота",
+          ]
+        : dayNames;
   const abbreviations =
     lang === "ru"
       ? ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"]
@@ -396,10 +408,14 @@ function Login({ done }: { done: () => void }) {
         >
           {tr("passkeyRegister")}
         </button>
-        {!passkeysSupported && <p className="error">{tr("passkeyUnavailable")}</p>}
+        {!passkeysSupported && (
+          <p className="error">{tr("passkeyUnavailable")}</p>
+        )}
         {passkeyErr && <p className="error">{passkeyErr}</p>}
       </div>
-      <div className="login-divider"><span>{tr("or")}</span></div>
+      <div className="login-divider">
+        <span>{tr("or")}</span>
+      </div>
       <button
         className="google-login"
         disabled={!googleReady}
@@ -547,6 +563,10 @@ function Workout({ done }: { done: () => void }) {
     [showCompleted, setShowCompleted] = useState(false),
     [finishing, setFinishing] = useState(false),
     [finishConfirmOpen, setFinishConfirmOpen] = useState(false),
+    [workoutAction, setWorkoutAction] = useState<"cancel" | "restart" | null>(
+      null,
+    ),
+    [actionBusy, setActionBusy] = useState(false),
     [finishError, setFinishError] = useState("");
   useEffect(() => {
     api("/workouts/active").then(async (active) => {
@@ -568,7 +588,8 @@ function Workout({ done }: { done: () => void }) {
   useEffect(() => {
     if (rest === null) return;
     const timer = setInterval(
-      () => setRest((value) => (value === null ? null : Math.max(0, value - 1))),
+      () =>
+        setRest((value) => (value === null ? null : Math.max(0, value - 1))),
       1000,
     );
     return () => clearInterval(timer);
@@ -583,8 +604,9 @@ function Workout({ done }: { done: () => void }) {
     if (!s) return;
     const count = showCompleted
       ? s.exercises.length
-      : s.exercises.filter((exercise) => exercise.sets.length < exercise.plannedSets)
-          .length;
+      : s.exercises.filter(
+          (exercise) => exercise.sets.length < exercise.plannedSets,
+        ).length;
     if (index >= count) setIndex(Math.max(0, count - 1));
   }, [index, s, showCompleted]);
   if (s === undefined) return <Loading />;
@@ -598,7 +620,10 @@ function Workout({ done }: { done: () => void }) {
     : s.exercises.filter(
         (exercise) => exercise.sets.length < exercise.plannedSets,
       );
-  const currentIndex = Math.min(index, Math.max(0, visibleExercises.length - 1));
+  const currentIndex = Math.min(
+    index,
+    Math.max(0, visibleExercises.length - 1),
+  );
   const ex = visibleExercises[currentIndex];
   const reload = () => api("/workouts/active").then(setS);
   const finish = async () => {
@@ -614,6 +639,37 @@ function Workout({ done }: { done: () => void }) {
     } catch {
       setFinishError(tr("finishError"));
       setFinishing(false);
+    }
+  };
+  const cancelOrRestart = async () => {
+    if (!workoutAction || actionBusy) return;
+    const action = workoutAction;
+    setActionBusy(true);
+    setFinishError("");
+    try {
+      await api(`/workouts/${s.id}/active`, { method: "DELETE" });
+      discardWorkout(s.id);
+      setRest(null);
+      if (action === "cancel") {
+        done();
+        return;
+      }
+      const dashboard = await api("/dashboard");
+      const restarted = await api("/workouts/start", {
+        method: "POST",
+        body: JSON.stringify({
+          templateId: dashboard.template.id,
+          clientMutationId: uuid(),
+        }),
+      });
+      setIndex(0);
+      setShowCompleted(false);
+      setS(restarted);
+      setWorkoutAction(null);
+    } catch {
+      setFinishError(tr("workoutActionError"));
+    } finally {
+      setActionBusy(false);
     }
   };
   const save = async (data: any) => {
@@ -647,10 +703,10 @@ function Workout({ done }: { done: () => void }) {
     customName: string;
   }) => {
     if (!ex) return;
-    const updated = await api(
-      `/workouts/${s.id}/exercises/${ex.id}/settings`,
-      { method: "PATCH", body: JSON.stringify(settings) },
-    );
+    const updated = await api(`/workouts/${s.id}/exercises/${ex.id}/settings`, {
+      method: "PATCH",
+      body: JSON.stringify(settings),
+    });
     setS(updated);
   };
   const deleteSet = async (setId: string) => {
@@ -670,13 +726,32 @@ function Workout({ done }: { done: () => void }) {
           </b>
           <small>Full Body</small>
         </div>
-        <span>
+        <span className="workout-time">
           {Math.floor((Date.now() - new Date(s.startedAt).getTime()) / 60000)}{" "}
           min
         </span>
+        <details className="workout-menu">
+          <summary aria-label={tr("workoutMenu")}>
+            <EllipsisVertical />
+          </summary>
+          <div>
+            <button type="button" onClick={() => setWorkoutAction("restart")}>
+              <RotateCcw /> {tr("restartWorkout")}
+            </button>
+            <button
+              type="button"
+              className="danger"
+              onClick={() => setWorkoutAction("cancel")}
+            >
+              <Trash2 /> {tr("cancelWorkout")}
+            </button>
+          </div>
+        </details>
       </div>
       <div className="progressbar">
-        <i style={{ width: `${(completedCount / s.exercises.length) * 100}%` }} />
+        <i
+          style={{ width: `${(completedCount / s.exercises.length) * 100}%` }}
+        />
       </div>
       <button
         type="button"
@@ -750,6 +825,24 @@ function Workout({ done }: { done: () => void }) {
           setFinishConfirmOpen(false);
           void finish();
         }}
+      />
+      <ConfirmDialog
+        open={workoutAction !== null}
+        title={tr(
+          workoutAction === "restart" ? "restartWorkout" : "cancelWorkout",
+        )}
+        text={tr(
+          workoutAction === "restart"
+            ? "restartWorkoutConfirm"
+            : "cancelWorkoutConfirm",
+        )}
+        confirmLabel={tr(
+          workoutAction === "restart" ? "restartWorkout" : "cancelWorkout",
+        )}
+        danger
+        busy={actionBusy}
+        onCancel={() => setWorkoutAction(null)}
+        onConfirm={() => void cancelOrRestart()}
       />
     </section>
   );
@@ -999,9 +1092,7 @@ function ExerciseCard({
             <NumberStep
               label={tr("setCount")}
               value={plannedSets}
-              set={(value) =>
-                setPlannedSets(Math.max(1, Math.min(20, value)))
-              }
+              set={(value) => setPlannedSets(Math.max(1, Math.min(20, value)))}
               step={1}
             />
             <fieldset className="unit-picker">
@@ -1073,9 +1164,7 @@ function ExerciseCard({
       )}
       <div className="inputs">
         <NumberStep
-          label={
-            ex.measurementUnit === "kg" ? tr("weight") : tr("loadInUnits")
-          }
+          label={ex.measurementUnit === "kg" ? tr("weight") : tr("loadInUnits")}
           value={weight}
           set={setWeight}
           step={
@@ -1133,7 +1222,7 @@ function NumberStep({
   suffix?: string;
 }) {
   return (
-    <label className="number">
+    <label className={`number${suffix ? "" : " no-suffix"}`}>
       <span>{label}</span>
       <div>
         <button
@@ -1196,10 +1285,9 @@ function History({ resume }: { resume: () => void }) {
   }, []);
   if (!rows) return <Loading />;
   const today = new Date();
-  const localDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(
-    2,
-    "0",
-  )}-${String(today.getDate()).padStart(2, "0")}`;
+  const localDate = `${today.getFullYear()}-${String(
+    today.getMonth() + 1,
+  ).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
   const isToday = (value?: string) => {
     if (!value) return false;
     const date = new Date(value);
@@ -1238,8 +1326,7 @@ function History({ resume }: { resume: () => void }) {
                   <span>
                     {e.sets
                       .map(
-                        (x) =>
-                          `${x.weight} ${tr(e.measurementUnit)}×${x.reps}`,
+                        (x) => `${x.weight} ${tr(e.measurementUnit)}×${x.reps}`,
                       )
                       .join(" · ")}
                   </span>
@@ -1516,7 +1603,7 @@ function Admin({ logout }: { logout: () => void }) {
   return (
     <section>
       <Header title={tr("settings")} subtitle={tr("programSettings")} />
-      
+
       <Card title={tr("profile")}>
         <label>
           {tr("displayName")}

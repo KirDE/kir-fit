@@ -63,13 +63,23 @@ const en = {
   nextExercise: "Next exercise",
   finish: "Finish workout",
   finishConfirm: "Finish this workout? You can resume it from today's history.",
-  finishError: "The workout could not be finished. Check the connection and try again.",
+  finishError:
+    "The workout could not be finished. Check the connection and try again.",
   resumeWorkout: "Resume workout",
   resumeError: "The workout could not be resumed.",
   deleteWorkout: "Delete workout",
   deleteWorkoutConfirm:
     "Delete this workout and all of its recorded sets? This cannot be undone.",
   deleteWorkoutError: "The workout could not be deleted.",
+  workoutMenu: "Workout menu",
+  cancelWorkout: "Cancel workout",
+  cancelWorkoutConfirm:
+    "Cancel this active workout and discard all recorded sets?",
+  restartWorkout: "Restart workout",
+  restartWorkoutConfirm:
+    "Discard this active workout and start a new one with values from the latest completed workout?",
+  workoutActionError:
+    "The workout could not be changed. Check the connection and try again.",
   startError: "Could not start workout.",
   rest: "REST",
   skip: "Skip",
@@ -181,6 +191,15 @@ const de: typeof en = {
   deleteWorkoutConfirm:
     "Dieses Training mit allen gespeicherten Sätzen löschen? Dies kann nicht rückgängig gemacht werden.",
   deleteWorkoutError: "Das Training konnte nicht gelöscht werden.",
+  workoutMenu: "Trainingsmenü",
+  cancelWorkout: "Training abbrechen",
+  cancelWorkoutConfirm:
+    "Dieses aktive Training abbrechen und alle darin gespeicherten Sätze verwerfen?",
+  restartWorkout: "Training neu starten",
+  restartWorkoutConfirm:
+    "Dieses aktive Training verwerfen und mit den Werten des letzten abgeschlossenen Trainings neu starten?",
+  workoutActionError:
+    "Das Training konnte nicht geändert werden. Prüfe die Verbindung und versuche es erneut.",
   startError: "Training konnte nicht gestartet werden.",
   rest: "PAUSE",
   skip: "Überspringen",
@@ -292,6 +311,15 @@ const ru: typeof en = {
   deleteWorkoutConfirm:
     "Удалить эту тренировку и все записанные подходы? Это действие нельзя отменить.",
   deleteWorkoutError: "Не удалось удалить тренировку.",
+  workoutMenu: "Меню тренировки",
+  cancelWorkout: "Отменить тренировку",
+  cancelWorkoutConfirm:
+    "Отменить текущую тренировку и удалить все записанные в ней подходы?",
+  restartWorkout: "Перезапустить тренировку",
+  restartWorkoutConfirm:
+    "Удалить текущую тренировку и начать новую со значениями из последней завершённой тренировки?",
+  workoutActionError:
+    "Не удалось изменить тренировку. Проверьте соединение и попробуйте ещё раз.",
   startError: "Не удалось начать тренировку.",
   rest: "ОТДЫХ",
   skip: "Пропустить",
