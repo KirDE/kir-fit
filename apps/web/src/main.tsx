@@ -8,6 +8,7 @@ import {
   House,
   LineChart as ChartIcon,
   Plus,
+  Ellipsis,
   EllipsisVertical,
   RotateCcw,
   Settings,
@@ -1270,20 +1271,27 @@ function ExerciseCard({
         />
         <NumberStep label={tr("reps")} value={reps} set={setReps} step={1} />
       </div>
-      <div className="rir">
-        <span>
-          RIR <small>{tr("optional")}</small>
-        </span>
-        {[0, 1, 2, 3, 4].map((n) => (
-          <button
-            key={n}
-            className={rir === n ? "selected" : ""}
-            onClick={() => setRir(rir === n ? null : n)}
-          >
-            {n === 4 ? "4+" : n}
-          </button>
-        ))}
-      </div>
+      <details className="rir-disclosure">
+        <summary aria-label="RIR">
+          <Ellipsis />
+          {rir !== null && <small>RIR {rir === 4 ? "4+" : rir}</small>}
+        </summary>
+        <div className="rir">
+          <span>
+            RIR <small>{tr("optional")}</small>
+          </span>
+          {[0, 1, 2, 3, 4].map((n) => (
+            <button
+              type="button"
+              key={n}
+              className={rir === n ? "selected" : ""}
+              onClick={() => setRir(rir === n ? null : n)}
+            >
+              {n === 4 ? "4+" : n}
+            </button>
+          ))}
+        </div>
+      </details>
       {ex.suggestIncrease && <div className="tip">{tr("increaseTip")}</div>}
       <button
         className="primary big complete"

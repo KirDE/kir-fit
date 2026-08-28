@@ -559,3 +559,36 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+
+.rir-disclosure {
+  margin: 8px 18px 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+}
+.rir-disclosure > summary {
+  width: fit-content;
+  min-width: 44px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel2);
+  cursor: pointer;
+  list-style: none;
+}
+.rir-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.rir-disclosure > summary svg {
+  width: 20px;
+}
+.rir-disclosure > summary small {
+  color: var(--accent);
+}
+.rir-disclosure .rir {
+  margin: 10px 0 0;
+}
