@@ -730,7 +730,10 @@ function Workout({ done }: { done: () => void }) {
           <small>Full Body</small>
         </div>
         <span className="workout-time">
-          {Math.floor((Date.now() - new Date(s.startedAt).getTime()) / 60000)}{" "}
+          {Math.max(
+            0,
+            Math.floor((Date.now() - new Date(s.startedAt).getTime()) / 60000),
+          )}{" "}
           min
         </span>
         <details ref={workoutMenuRef} className="workout-menu">
