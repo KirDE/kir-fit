@@ -44,7 +44,12 @@ import type { Exercise, Session, WorkoutExercise } from "./types";
 import "./styles.css";
 import { registerSW } from "virtual:pwa-register";
 import "./enhancements.css";
-registerSW({ immediate: true });
+registerSW({
+  immediate: true,
+  onRegisteredSW: (_swUrl, registration) => {
+    void registration?.update();
+  },
+});
 type View = "home" | "workout" | "history" | "progress" | "weight" | "admin";
 const dayNames = [
   "Sunday",

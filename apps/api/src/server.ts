@@ -1026,12 +1026,28 @@ app.use(
 );
 const here = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(here, "../../web/dist");
-app.use(express.static(publicDir, { maxAge: "1h" }));
-app.get("/{*splat}", (req, res, next) =>
-  req.path.startsWith("/api/")
-    ? next()
-    : res.sendFile(path.join(publicDir, "index.html")),
+app.use(
+  express.static(publicDir, {
+    maxAge: "1h",
+    setHeaders: (res, filePath) => {
+      const fileName = path.basename(filePath);
+      if (
+        fileName === "index.html" ||
+        fileName === "sw.js" ||
+        fileName === "manifest.webmanifest"
+      ) {
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      }
+    },
+  }),
 );
+app.get("/{*splat}", (req, res, next) => {
+  if (req.path.startsWith("/api/")) return next();
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  return res.sendFile(path.join(publicDir, "index.html"));
+});
 app.use((err: any, _req: any, res: any, _next: any) => {
   _req.log?.error(err);
   if (err instanceof z.ZodError)
