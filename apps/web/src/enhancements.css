@@ -553,3 +553,9 @@
 .workout-menu button svg {
   width: 18px;
 }
+
+.exercise-title h1 {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

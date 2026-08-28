@@ -752,6 +752,33 @@ function Workout({ done }: { done: () => void }) {
     await api(`/workouts/${s.id}/sets/${setId}`, { method: "DELETE" });
     await reload();
   };
+  const toggleCompletedExercises = () => {
+    const currentExercise = visibleExercises[currentIndex];
+    const nextShowCompleted = !showCompleted;
+    const nextVisibleExercises = nextShowCompleted
+      ? s.exercises
+      : s.exercises.filter(
+          (exercise) => exercise.sets.length < exercise.plannedSets,
+        );
+    let nextIndex = currentExercise
+      ? nextVisibleExercises.findIndex(
+          (exercise) => exercise.id === currentExercise.id,
+        )
+      : 0;
+    if (nextIndex < 0) {
+      const currentProgramIndex = s.exercises.findIndex(
+        (exercise) => exercise.id === currentExercise?.id,
+      );
+      nextIndex = nextVisibleExercises.findIndex(
+        (exercise) => s.exercises.indexOf(exercise) >= currentProgramIndex,
+      );
+      if (nextIndex < 0)
+        nextIndex = Math.max(0, nextVisibleExercises.length - 1);
+    }
+    setIndex(nextIndex);
+    setShowCompleted(nextShowCompleted);
+    workoutMenuRef.current?.removeAttribute("open");
+  };
 
   return (
     <section className="workout">
@@ -777,14 +804,7 @@ function Workout({ done }: { done: () => void }) {
             <EllipsisVertical />
           </summary>
           <div>
-            <button
-              type="button"
-              onClick={() => {
-                setIndex(0);
-                setShowCompleted((value) => !value);
-                workoutMenuRef.current?.removeAttribute("open");
-              }}
-            >
+            <button type="button" onClick={toggleCompletedExercises}>
               {showCompleted ? <EyeOff /> : <Eye />}{" "}
               {showCompleted ? tr("hideCompleted") : tr("showAllExercises")}
             </button>
