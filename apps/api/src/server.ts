@@ -554,36 +554,73 @@ app.post(
         },
       },
     });
+    const previousInputs = new Map(
+      await Promise.all(
+        template.exercises.map(async (templateExercise) => {
+          const previousExercise = await prisma.workoutExercise.findFirst({
+            where: {
+              exerciseId: templateExercise.exerciseId,
+              session: {
+                userId: userId(req),
+                status: "completed",
+              },
+              sets: { some: {} },
+            },
+            orderBy: { session: { finishedAt: "desc" } },
+            include: {
+              sets: {
+                orderBy: [{ completedAt: "desc" }, { setNumber: "desc" }],
+                take: 1,
+              },
+            },
+          });
+          const previousSet = previousExercise?.sets[0];
+          return [
+            templateExercise.exerciseId,
+            previousSet
+              ? {
+                  weight: previousSet.weight,
+                  reps: previousSet.reps,
+                  rir: previousSet.rir,
+                }
+              : null,
+          ] as const;
+        }),
+      ),
+    );
     const session = await prisma.workoutSession.create({
       data: {
         userId: userId(req),
         templateId: template.id,
         clientMutationId: body.clientMutationId,
         exercises: {
-          create: template.exercises.map((t) => ({
-            exerciseId: t.exerciseId,
-            sortOrder: t.sortOrder,
-            plannedSets:
-              body.introWeeks && t.exercise.exerciseType === "compound"
-                ? Math.min(2, t.sets)
-                : t.sets,
-            minReps: t.minReps,
-            maxReps: t.maxReps,
-            restSeconds: t.restSeconds,
-            measurementUnit: t.measurementUnit,
-            customName: t.customName,
-            lastWeight: t.lastWeight,
-            lastReps: t.lastReps,
-            lastRir: t.lastRir,
-            exerciseNameSnapshot: t.exercise.nameEn,
-            machineId: t.exercise.machines[0]?.id,
-            machineSettingsSnapshot: t.exercise.machines[0]
-              ? {
-                  seat: t.exercise.machines[0].seatSetting,
-                  backrest: t.exercise.machines[0].backrestSetting,
-                }
-              : undefined,
-          })),
+          create: template.exercises.map((t) => {
+            const previous = previousInputs.get(t.exerciseId);
+            return {
+              exerciseId: t.exerciseId,
+              sortOrder: t.sortOrder,
+              plannedSets:
+                body.introWeeks && t.exercise.exerciseType === "compound"
+                  ? Math.min(2, t.sets)
+                  : t.sets,
+              minReps: t.minReps,
+              maxReps: t.maxReps,
+              restSeconds: t.restSeconds,
+              measurementUnit: t.measurementUnit,
+              customName: t.customName,
+              lastWeight: previous?.weight ?? null,
+              lastReps: previous?.reps ?? null,
+              lastRir: previous?.rir ?? null,
+              exerciseNameSnapshot: t.exercise.nameEn,
+              machineId: t.exercise.machines[0]?.id,
+              machineSettingsSnapshot: t.exercise.machines[0]
+                ? {
+                    seat: t.exercise.machines[0].seatSetting,
+                    backrest: t.exercise.machines[0].backrestSetting,
+                  }
+                : undefined,
+            };
+          }),
         },
       },
       include: sessionInclude,
