@@ -455,6 +455,10 @@
   color: var(--accent);
   font-weight: 800;
 }
+.history .unfinished {
+  color: var(--accent);
+  font-weight: 700;
+}
 .delete-workout {
   width: 100%;
   min-height: 42px;

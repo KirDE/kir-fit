@@ -1388,7 +1388,10 @@ function History({ resume }: { resume: () => void }) {
     [deleteTarget, setDeleteTarget] = useState<Session>(),
     [deleting, setDeleting] = useState(false);
   useEffect(() => {
-    api("/history").then(setRows);
+    Promise.all([api("/history"), api("/workouts/active")]).then(
+      ([history, activeWorkout]) =>
+        setRows(activeWorkout ? [activeWorkout, ...history] : history),
+    );
   }, []);
   if (!rows) return <Loading />;
   const today = new Date();
@@ -1414,11 +1417,15 @@ function History({ resume }: { resume: () => void }) {
             <summary>
               <div>
                 <b>
-                  {new Date(s.finishedAt!).toLocaleDateString(getLanguage())}
+                  {new Date(
+                    s.finishedAt || s.startedAt,
+                  ).toLocaleDateString(getLanguage())}
                 </b>
-                <span>
-                  {s.summary.durationMinutes} min · {s.summary.setCount}{" "}
-                  {tr("sets").toLowerCase()}
+                <span className={s.status === "active" ? "unfinished" : ""}>
+                  {s.status === "active"
+                    ? tr("unfinishedWorkout")
+                    : `${s.summary.durationMinutes} min`} {" · "}
+                  {s.summary.setCount} {tr("sets").toLowerCase()}
                 </span>
               </div>
               <strong>
@@ -1439,6 +1446,15 @@ function History({ resume }: { resume: () => void }) {
                   </span>
                 </div>
               ))}
+            {s.status === "active" && (
+              <button
+                type="button"
+                className="resume-workout"
+                onClick={resume}
+              >
+                {tr("continueWorkout")}
+              </button>
+            )}
             {isToday(s.finishedAt) && (
               <button
                 type="button"
@@ -1462,13 +1478,15 @@ function History({ resume }: { resume: () => void }) {
                 {tr("resumeWorkout")}
               </button>
             )}
-            <button
-              type="button"
-              className="delete-workout"
-              onClick={() => setDeleteTarget(s)}
-            >
-              {tr("deleteWorkout")}
-            </button>
+            {s.status !== "active" && (
+              <button
+                type="button"
+                className="delete-workout"
+                onClick={() => setDeleteTarget(s)}
+              >
+                {tr("deleteWorkout")}
+              </button>
+            )}
           </details>
         ))}
         {!rows.length && <Empty text={tr("emptyHistory")} />}

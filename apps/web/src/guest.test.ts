@@ -130,6 +130,7 @@ describe("guest persistence", () => {
     localStorage.setItem("kirfit_language", "ru");
     expect(tr("startWorkout")).toBe("Начать тренировку");
     expect(tr("continueWorkout")).toBe("Продолжить тренировку");
+    expect(tr("unfinishedWorkout")).toBe("Не закончена");
     expect(tr("guestWarning")).toContain("данные");
   });
   it("detects a supported browser language and falls back to English", () => {
