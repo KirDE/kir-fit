@@ -505,7 +505,10 @@ function Dashboard({
 }) {
   const [d, setD] = useState<any>();
   useEffect(() => {
-    api("/dashboard").then(setD);
+    Promise.all([api("/dashboard"), api("/workouts/active")]).then(
+      ([dashboard, activeWorkout]) =>
+        setD({ ...dashboard, hasActiveWorkout: Boolean(activeWorkout) }),
+    );
   }, []);
   if (!d) return <Loading />;
   const next = new Date(d.nextWorkout),
@@ -524,7 +527,8 @@ function Dashboard({
           {lang === "ru" ? "упражнений" : tr("exercises").toLowerCase()}
         </p>
         <button className="primary big" onClick={start}>
-          <Dumbbell /> {tr("startWorkout")}
+          <Dumbbell />
+          {tr(d.hasActiveWorkout ? "continueWorkout" : "startWorkout")}
         </button>
       </div>
       <div className="grid">
