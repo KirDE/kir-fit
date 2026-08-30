@@ -773,6 +773,7 @@ function Workout({ done }: { done: () => void }) {
   };
   const updateSettings = async (settings: {
     plannedSets: number;
+    increment: number;
     measurementUnit: "kg" | "units";
     customName: string;
   }) => {
@@ -1080,6 +1081,7 @@ function ExerciseCard({
   deleteSet: (setId: string) => Promise<void>;
   updateSettings: (v: {
     plannedSets: number;
+    increment: number;
     measurementUnit: "kg" | "units";
     customName: string;
   }) => Promise<void>;
@@ -1095,6 +1097,7 @@ function ExerciseCard({
     ),
     [settingsOpen, setSettingsOpen] = useState(false),
     [plannedSets, setPlannedSets] = useState(ex.plannedSets),
+    [increment, setIncrement] = useState(ex.increment),
     [measurementUnit, setMeasurementUnit] = useState(ex.measurementUnit),
     [customName, setCustomName] = useState(ex.customName || ""),
     [settingsBusy, setSettingsBusy] = useState(false),
@@ -1104,6 +1107,7 @@ function ExerciseCard({
     setReps(ex.sets.at(-1)?.reps ?? ex.lastReps ?? ex.minReps);
     setRir(ex.sets.at(-1)?.rir ?? ex.lastRir ?? null);
     setPlannedSets(ex.plannedSets);
+    setIncrement(ex.increment);
     setMeasurementUnit(ex.measurementUnit);
     setCustomName(ex.customName || "");
     setSelectedSet(undefined);
@@ -1163,6 +1167,7 @@ function ExerciseCard({
               try {
                 await updateSettings({
                   plannedSets,
+                  increment,
                   measurementUnit,
                   customName,
                 });
@@ -1192,6 +1197,13 @@ function ExerciseCard({
               value={plannedSets}
               set={(value) => setPlannedSets(Math.max(1, Math.min(20, value)))}
               step={1}
+            />
+            <NumberStep
+              label={tr("weightStep")}
+              value={increment}
+              set={(value) => setIncrement(Math.max(0.1, value))}
+              step={0.5}
+              suffix={tr(measurementUnit)}
             />
             <fieldset className="unit-picker">
               <legend>{tr("loadUnit")}</legend>
@@ -1265,13 +1277,7 @@ function ExerciseCard({
           label={ex.measurementUnit === "kg" ? tr("weight") : tr("loadInUnits")}
           value={weight}
           set={setWeight}
-          step={
-            ex.measurementUnit === "units"
-              ? 1
-              : ex.machine?.weightIncrement ||
-                ex.exercise.defaultIncrement ||
-                2.5
-          }
+          step={ex.increment}
           suffix={tr(ex.measurementUnit)}
         />
         <NumberStep label={tr("reps")} value={reps} set={setReps} step={1} />

@@ -607,6 +607,7 @@ app.post(
               minReps: t.minReps,
               maxReps: t.maxReps,
               restSeconds: t.restSeconds,
+              increment: t.increment,
               measurementUnit: t.measurementUnit,
               customName: t.customName,
               lastWeight: previous?.weight ?? null,
@@ -689,6 +690,7 @@ app.patch(
     const body = z
       .object({
         plannedSets: z.number().int().min(1).max(20),
+        increment: z.number().positive().max(100),
         measurementUnit: z.enum(["kg", "units"]),
         customName: z
           .string()
@@ -719,6 +721,7 @@ app.patch(
         },
         data: {
           sets: body.plannedSets,
+          increment: new Prisma.Decimal(body.increment),
           measurementUnit: body.measurementUnit,
           customName: body.customName,
         },
@@ -1105,6 +1108,7 @@ function serializeSession(s: any) {
     summary: sessionSummary(s),
     exercises: s.exercises.map((e: any) => ({
       ...e,
+      increment: num(e.increment),
       lastWeight: e.lastWeight === null ? null : num(e.lastWeight),
       exercise: serializeExercise(e.exercise),
       sets: e.sets.map((x: any) => ({ ...x, weight: num(x.weight) })),

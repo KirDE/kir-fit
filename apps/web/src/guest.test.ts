@@ -19,6 +19,7 @@ describe("guest persistence", () => {
       body: JSON.stringify({ introWeeks: true }),
     });
     const exercise = started.exercises[0];
+    expect(exercise.increment).toBe(2.5);
     await guestApi(`/workouts/${started.id}/sets`, {
       method: "POST",
       body: JSON.stringify({
@@ -58,6 +59,7 @@ describe("guest persistence", () => {
         method: "PATCH",
         body: JSON.stringify({
           plannedSets: 4,
+          increment: 1.25,
           measurementUnit: "units",
           customName: "Тренажёр у окна",
         }),
@@ -65,6 +67,7 @@ describe("guest persistence", () => {
     );
     expect(updated.exercises[0]).toMatchObject({
       plannedSets: 4,
+      increment: 1.25,
       measurementUnit: "units",
       customName: "Тренажёр у окна",
     });
@@ -85,6 +88,7 @@ describe("guest persistence", () => {
     });
     expect(next.exercises[0]).toMatchObject({
       plannedSets: 4,
+      increment: 1.25,
       measurementUnit: "units",
       customName: "Тренажёр у окна",
       lastWeight: 17,

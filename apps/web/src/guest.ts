@@ -11,7 +11,7 @@ const exercises = [
     10,
     12,
     120,
-    5,
+    2.5,
   ],
   [
     "chest-press",
@@ -152,6 +152,7 @@ type State = {
     string,
     {
       plannedSets: number;
+      increment?: number;
       measurementUnit: "kg" | "units";
       customName?: string | null;
       lastWeight?: number | null;
@@ -204,6 +205,7 @@ const session = (s: any) => ({
   summary: summary(s),
   exercises: s.exercises.map((e: any) => ({
     ...e,
+    increment: e.increment ?? e.exercise.defaultIncrement ?? 2.5,
     measurementUnit: e.measurementUnit || "kg",
     suggestIncrease:
       e.sets.length === e.plannedSets &&
@@ -259,6 +261,7 @@ export async function guestApi(path: string, init: RequestInit = {}) {
           minReps: e.minReps,
           maxReps: e.maxReps,
           restSeconds: e.defaultRestSeconds,
+          increment: settings?.increment ?? e.defaultIncrement,
           measurementUnit: settings?.measurementUnit || "kg",
           customName: settings?.customName || null,
           lastWeight: settings?.lastWeight ?? null,
@@ -308,11 +311,13 @@ export async function guestApi(path: string, init: RequestInit = {}) {
     const e = s.exercises.find((x: any) => x.id === m![2]);
     const settings = body(init);
     e.plannedSets = settings.plannedSets;
+    e.increment = settings.increment;
     e.measurementUnit = settings.measurementUnit;
     e.customName = settings.customName || null;
     state.exerciseSettings[e.exercise.id] = {
       ...state.exerciseSettings[e.exercise.id],
       plannedSets: settings.plannedSets,
+      increment: settings.increment,
       measurementUnit: settings.measurementUnit,
       customName: settings.customName || null,
     };

@@ -17,7 +17,7 @@ const exercises = [
     10,
     12,
     120,
-    5,
+    2.5,
   ],
   [
     "chest-press",

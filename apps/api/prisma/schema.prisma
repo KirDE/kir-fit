@@ -154,6 +154,7 @@ model WorkoutExercise {
   minReps                 Int
   maxReps                 Int
   restSeconds             Int
+  increment               Decimal        @default(2.5) @db.Decimal(6, 2)
   measurementUnit         String         @default("kg")
   customName              String?
   lastWeight              Decimal?       @db.Decimal(6, 2)

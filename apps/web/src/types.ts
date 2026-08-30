@@ -1,4 +1,4 @@
 export type SetRow={id:string;setNumber:number;weight:number;reps:number;rir:number|null};
 export type Exercise={id:string;nameEn:string;nameDe:string;nameRu?:string;description:string;descriptionDe?:string;descriptionRu?:string;instructions:string;instructionsDe?:string;instructionsRu?:string;targetMuscles:string[];defaultIncrement:number;images:{path:string;caption?:string}[];machines:any[]};
-export type WorkoutExercise={id:string;exercise:Exercise;plannedSets:number;minReps:number;maxReps:number;restSeconds:number;measurementUnit:"kg"|"units";customName?:string|null;lastWeight?:number|null;lastReps?:number|null;lastRir?:number|null;sets:SetRow[];suggestIncrease:boolean;machine?:any};
+export type WorkoutExercise={id:string;exercise:Exercise;plannedSets:number;minReps:number;maxReps:number;restSeconds:number;increment:number;measurementUnit:"kg"|"units";customName?:string|null;lastWeight?:number|null;lastReps?:number|null;lastRir?:number|null;sets:SetRow[];suggestIncrease:boolean;machine?:any};
 export type Session={id:string;startedAt:string;finishedAt?:string;status:string;exercises:WorkoutExercise[];summary:any};
