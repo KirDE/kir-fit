@@ -41,6 +41,7 @@ import {
   type RestTimerState,
 } from "./offline";
 import { getLanguage, setLanguage, tr } from "./i18n";
+import { paddedDomain } from "./chart";
 import type { Exercise, Session, WorkoutExercise } from "./types";
 import "./styles.css";
 import { registerSW } from "virtual:pwa-register";
@@ -1558,10 +1559,12 @@ function Chart({
   data,
   dataKey,
   suffix,
+  yDomain,
 }: {
   data: any[];
   dataKey: string;
   suffix: string;
+  yDomain?: [number, number];
 }) {
   return (
     <div className="chart">
@@ -1576,7 +1579,7 @@ function Chart({
           }))}
         >
           <XAxis dataKey="date" />
-          <YAxis width={45} />
+          <YAxis width={45} domain={yDomain} />
           <Tooltip
             formatter={(v: any) => [
               `${Number(v).toLocaleString()}${suffix}`,
@@ -1599,7 +1602,15 @@ function BodyWeight() {
   const [rows, setRows] = useState<any[]>(),
     [weight, setWeight] = useState<number | "">(""),
     [notes, setNotes] = useState("");
-  const load = () => api("/body-weight").then(setRows);
+  const load = () =>
+    api("/body-weight").then((loadedRows: any[]) => {
+      setRows(loadedRows);
+      setWeight((current) =>
+        current === "" && loadedRows.length
+          ? Number(loadedRows.at(-1).weight)
+          : current,
+      );
+    });
   useEffect(() => {
     load();
   }, []);
@@ -1631,7 +1642,12 @@ function BodyWeight() {
         </p>
       </div>
       <Card title={tr("weightTrend")}>
-        <Chart data={rows} dataKey="weight" suffix={` ${tr("kg")}`} />
+        <Chart
+          data={rows}
+          dataKey="weight"
+          suffix={` ${tr("kg")}`}
+          yDomain={paddedDomain(rows.map((row) => Number(row.weight)))}
+        />
       </Card>
       <Card title={tr("addEntry")}>
         <NumberStep
