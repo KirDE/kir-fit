@@ -84,26 +84,6 @@ const en = {
     "The workout could not be changed. Check the connection and try again.",
   startError: "Could not start workout.",
   rest: "REST",
-  restNotifications: "Rest timer notifications",
-  restNotificationsDescription:
-    "Show the remaining rest time and its exact end time in mobile notifications.",
-  restNotificationEnabled: "Rest timer notifications are enabled.",
-  restNotificationUnavailable:
-    "Notifications are not supported in this browser. On iPhone, install Fit on the Home Screen first.",
-  restNotificationPermissionTitle: "Rest timer in notifications",
-  restNotificationPermissionText:
-    "If you allow notifications, the mobile notification area and lock screen can show the remaining rest time and the exact end time. Fit will also notify you when the rest is over.",
-  allowNotifications: "Allow notifications",
-  configureNotifications: "Set up notifications",
-  notNow: "Not now",
-  dontShowAgain: "Do not show this automatically again",
-  restNotificationBlocked:
-    "Notifications are blocked. Allow them for this site in your browser or phone settings, then try again.",
-  restNotificationTimer: "Rest · {timer}",
-  restNotificationUntil:
-    "Ends at {time}. The countdown updates while Fit is active.",
-  restNotificationFinished: "Rest finished",
-  restNotificationNextSet: "Time for the next set.",
   skip: "Skip",
   undo: "Undo last set",
   workingWeight: "Working weight",
@@ -229,26 +209,6 @@ const de: typeof en = {
     "Das Training konnte nicht geändert werden. Prüfe die Verbindung und versuche es erneut.",
   startError: "Training konnte nicht gestartet werden.",
   rest: "PAUSE",
-  restNotifications: "Pausentimer-Benachrichtigungen",
-  restNotificationsDescription:
-    "Verbleibende Pausenzeit und genaue Endzeit in mobilen Benachrichtigungen anzeigen.",
-  restNotificationEnabled: "Pausentimer-Benachrichtigungen sind aktiviert.",
-  restNotificationUnavailable:
-    "Dieser Browser unterstützt keine Benachrichtigungen. Installiere Fit auf dem iPhone zuerst auf dem Home-Bildschirm.",
-  restNotificationPermissionTitle: "Pausentimer in Benachrichtigungen",
-  restNotificationPermissionText:
-    "Wenn du Benachrichtigungen erlaubst, zeigen die Benachrichtigungsleiste und der Sperrbildschirm die verbleibende Pausenzeit und die genaue Endzeit. Fit meldet außerdem das Ende der Pause.",
-  allowNotifications: "Benachrichtigungen erlauben",
-  configureNotifications: "Benachrichtigungen einrichten",
-  notNow: "Nicht jetzt",
-  dontShowAgain: "Nicht mehr automatisch anzeigen",
-  restNotificationBlocked:
-    "Benachrichtigungen sind blockiert. Erlaube sie für diese Website in den Browser- oder Geräteeinstellungen und versuche es erneut.",
-  restNotificationTimer: "Pause · {timer}",
-  restNotificationUntil:
-    "Endet um {time}. Der Countdown wird aktualisiert, solange Fit aktiv ist.",
-  restNotificationFinished: "Pause beendet",
-  restNotificationNextSet: "Zeit für den nächsten Satz.",
   skip: "Überspringen",
   undo: "Letzten Satz rückgängig",
   workingWeight: "Arbeitsgewicht",
@@ -374,26 +334,6 @@ const ru: typeof en = {
     "Не удалось изменить тренировку. Проверьте соединение и попробуйте ещё раз.",
   startError: "Не удалось начать тренировку.",
   rest: "ОТДЫХ",
-  restNotifications: "Уведомления таймера отдыха",
-  restNotificationsDescription:
-    "Показывать оставшееся время отдыха и точное время окончания в мобильных уведомлениях.",
-  restNotificationEnabled: "Уведомления таймера отдыха включены.",
-  restNotificationUnavailable:
-    "Этот браузер не поддерживает уведомления. На iPhone сначала установите Fit на экран «Домой».",
-  restNotificationPermissionTitle: "Таймер отдыха в уведомлениях",
-  restNotificationPermissionText:
-    "Если вы разрешите уведомления, в шторке и на экране блокировки будут видны оставшееся время отдыха и точное время окончания. Fit также сообщит, когда отдых закончится.",
-  allowNotifications: "Дать разрешение",
-  configureNotifications: "Настроить уведомления",
-  notNow: "Не сейчас",
-  dontShowAgain: "Больше не показывать автоматически",
-  restNotificationBlocked:
-    "Уведомления заблокированы. Разрешите их для этого сайта в настройках браузера или телефона и попробуйте снова.",
-  restNotificationTimer: "Отдых · {timer}",
-  restNotificationUntil:
-    "До {time}. Отсчёт обновляется, пока Fit активно.",
-  restNotificationFinished: "Отдых закончен",
-  restNotificationNextSet: "Можно начинать следующий подход.",
   skip: "Пропустить",
   undo: "Отменить последний подход",
   workingWeight: "Рабочий вес",
