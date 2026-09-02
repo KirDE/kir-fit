@@ -47,7 +47,7 @@ describe("guest persistence", () => {
       preferredWeekdays: [2, 4],
     });
   });
-  it("persists set count and unit settings for the next workout", async () => {
+  it("persists set count, rest time and unit settings for the next workout", async () => {
     const started: any = await guestApi("/workouts/start", {
       method: "POST",
       body: JSON.stringify({ introWeeks: true }),
@@ -59,6 +59,7 @@ describe("guest persistence", () => {
         method: "PATCH",
         body: JSON.stringify({
           plannedSets: 4,
+          restSeconds: 75,
           increment: 1.25,
           measurementUnit: "units",
           customName: "Тренажёр у окна",
@@ -67,6 +68,7 @@ describe("guest persistence", () => {
     );
     expect(updated.exercises[0]).toMatchObject({
       plannedSets: 4,
+      restSeconds: 75,
       increment: 1.25,
       measurementUnit: "units",
       customName: "Тренажёр у окна",
@@ -88,6 +90,7 @@ describe("guest persistence", () => {
     });
     expect(next.exercises[0]).toMatchObject({
       plannedSets: 4,
+      restSeconds: 75,
       increment: 1.25,
       measurementUnit: "units",
       customName: "Тренажёр у окна",

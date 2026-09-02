@@ -831,6 +831,7 @@ function Workout({ done }: { done: () => void }) {
   };
   const updateSettings = async (settings: {
     plannedSets: number;
+    restSeconds: number;
     increment: number;
     measurementUnit: "kg" | "units";
     customName: string;
@@ -1240,6 +1241,7 @@ function ExerciseCard({
   deleteSet: (setId: string) => Promise<void>;
   updateSettings: (v: {
     plannedSets: number;
+    restSeconds: number;
     increment: number;
     measurementUnit: "kg" | "units";
     customName: string;
@@ -1256,6 +1258,9 @@ function ExerciseCard({
     ),
     [settingsOpen, setSettingsOpen] = useState(false),
     [plannedSets, setPlannedSets] = useState(ex.plannedSets),
+    [configuredRestSeconds, setConfiguredRestSeconds] = useState(
+      ex.restSeconds,
+    ),
     [increment, setIncrement] = useState(ex.increment),
     [measurementUnit, setMeasurementUnit] = useState(ex.measurementUnit),
     [customName, setCustomName] = useState(ex.customName || ""),
@@ -1266,6 +1271,7 @@ function ExerciseCard({
     setReps(ex.sets.at(-1)?.reps ?? ex.lastReps ?? ex.minReps);
     setRir(ex.sets.at(-1)?.rir ?? ex.lastRir ?? null);
     setPlannedSets(ex.plannedSets);
+    setConfiguredRestSeconds(ex.restSeconds);
     setIncrement(ex.increment);
     setMeasurementUnit(ex.measurementUnit);
     setCustomName(ex.customName || "");
@@ -1326,6 +1332,7 @@ function ExerciseCard({
               try {
                 await updateSettings({
                   plannedSets,
+                  restSeconds: configuredRestSeconds,
                   increment,
                   measurementUnit,
                   customName,
@@ -1356,6 +1363,17 @@ function ExerciseCard({
               value={plannedSets}
               set={(value) => setPlannedSets(Math.max(1, Math.min(20, value)))}
               step={1}
+            />
+            <NumberStep
+              label={tr("restTime")}
+              value={configuredRestSeconds}
+              set={(value) =>
+                setConfiguredRestSeconds(
+                  Math.max(30, Math.min(600, Number(value) || 30)),
+                )
+              }
+              step={15}
+              suffix={tr("secondsShort")}
             />
             <NumberStep
               label={tr("weightStep")}

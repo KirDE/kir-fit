@@ -152,6 +152,7 @@ type State = {
     string,
     {
       plannedSets: number;
+      restSeconds?: number;
       increment?: number;
       measurementUnit: "kg" | "units";
       customName?: string | null;
@@ -260,7 +261,7 @@ export async function guestApi(path: string, init: RequestInit = {}) {
               : e.defaultSets),
           minReps: e.minReps,
           maxReps: e.maxReps,
-          restSeconds: e.defaultRestSeconds,
+          restSeconds: settings?.restSeconds ?? e.defaultRestSeconds,
           increment: settings?.increment ?? e.defaultIncrement,
           measurementUnit: settings?.measurementUnit || "kg",
           customName: settings?.customName || null,
@@ -311,12 +312,14 @@ export async function guestApi(path: string, init: RequestInit = {}) {
     const e = s.exercises.find((x: any) => x.id === m![2]);
     const settings = body(init);
     e.plannedSets = settings.plannedSets;
+    e.restSeconds = settings.restSeconds;
     e.increment = settings.increment;
     e.measurementUnit = settings.measurementUnit;
     e.customName = settings.customName || null;
     state.exerciseSettings[e.exercise.id] = {
       ...state.exerciseSettings[e.exercise.id],
       plannedSets: settings.plannedSets,
+      restSeconds: settings.restSeconds,
       increment: settings.increment,
       measurementUnit: settings.measurementUnit,
       customName: settings.customName || null,

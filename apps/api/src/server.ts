@@ -690,6 +690,7 @@ app.patch(
     const body = z
       .object({
         plannedSets: z.number().int().min(1).max(20),
+        restSeconds: z.number().int().min(30).max(600),
         increment: z.number().positive().max(100),
         measurementUnit: z.enum(["kg", "units"]),
         customName: z
@@ -721,6 +722,7 @@ app.patch(
         },
         data: {
           sets: body.plannedSets,
+          restSeconds: body.restSeconds,
           increment: new Prisma.Decimal(body.increment),
           measurementUnit: body.measurementUnit,
           customName: body.customName,
