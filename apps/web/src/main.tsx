@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Dumbbell,
+  Bell,
   Eye,
   EyeOff,
   History as HistoryIcon,
@@ -42,6 +43,15 @@ import {
 } from "./offline";
 import { getLanguage, setLanguage, tr } from "./i18n";
 import { paddedDomain } from "./chart";
+import {
+  closeRestTimerNotification,
+  requestRestNotificationPermission,
+  restNotificationPermission,
+  setRestNotificationPromptDismissed,
+  shouldPromptForRestNotifications,
+  showRestFinishedNotification,
+  showRestTimerNotification,
+} from "./restNotifications";
 import type { Exercise, Session, WorkoutExercise } from "./types";
 import "./styles.css";
 import { registerSW } from "virtual:pwa-register";
@@ -138,6 +148,23 @@ const localizedTargets = (xs: string[]) =>
           )[x] || x,
       )
     : xs;
+const formatRestDuration = (seconds: number) =>
+  `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+const formatRestEndTime = (endsAt: number) =>
+  new Intl.DateTimeFormat(getLanguage(), {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(endsAt);
+const restNotificationText = (seconds: number, endsAt: number) => ({
+  title: tr("restNotificationTimer").replace(
+    "{timer}",
+    formatRestDuration(seconds),
+  ),
+  body: tr("restNotificationUntil").replace(
+    "{time}",
+    formatRestEndTime(endsAt),
+  ),
+});
 function App() {
   const [authed, setAuthed] = useState(!!token() || isGuest());
   const [view, setView] = useState<View>("home");
@@ -573,6 +600,9 @@ function Dashboard({
 }
 function Workout({ done }: { done: () => void }) {
   const workoutMenuRef = useRef<HTMLDetailsElement>(null);
+  const lastNotifiedSecondRef = useRef<number | null>(null);
+  const restFinishedNotifiedRef = useRef(false);
+  const notificationPromptShownRef = useRef(false);
   const [s, setS] = useState<Session | null | undefined>(),
     [index, setIndex] = useState(0),
     [restTimer, setRestTimer] = useState<RestTimerState | null>(null),
@@ -584,7 +614,8 @@ function Workout({ done }: { done: () => void }) {
       null,
     ),
     [actionBusy, setActionBusy] = useState(false),
-    [finishError, setFinishError] = useState("");
+    [finishError, setFinishError] = useState(""),
+    [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
   useEffect(() => {
     api("/workouts/active").then(async (active) => {
       if (active) setS(active);
@@ -604,13 +635,32 @@ function Workout({ done }: { done: () => void }) {
   }, []);
   useEffect(() => {
     if (restTimer === null) return;
+    lastNotifiedSecondRef.current = null;
+    restFinishedNotifiedRef.current = false;
     const syncClock = () => {
       const now = Date.now();
+      const remaining = remainingRestSeconds(restTimer, now);
       setClockNow(now);
-      if (remainingRestSeconds(restTimer, now) === 0) {
+      if (remaining === 0) {
+        if (!restFinishedNotifiedRef.current) {
+          restFinishedNotifiedRef.current = true;
+          void showRestFinishedNotification(
+            tr("restNotificationFinished"),
+            tr("restNotificationNextSet"),
+          );
+        }
         navigator.vibrate?.([250, 120, 250]);
         if (s) localStorage.removeItem(`kirfit_rest_${s.id}`);
         setRestTimer(null);
+      } else if (
+        lastNotifiedSecondRef.current === null ||
+        (remaining !== lastNotifiedSecondRef.current &&
+          (remaining % 10 === 0 || remaining <= 5))
+      ) {
+        lastNotifiedSecondRef.current = remaining;
+        const endsAt = restTimer.startedAt + restTimer.durationSeconds * 1000;
+        const copy = restNotificationText(remaining, endsAt);
+        void showRestTimerNotification(copy.title, copy.body, endsAt);
       }
     };
     syncClock();
@@ -673,6 +723,7 @@ function Workout({ done }: { done: () => void }) {
     restTimer === null ? null : remainingRestSeconds(restTimer, clockNow);
   const clearRest = () => {
     localStorage.removeItem(`kirfit_rest_${s.id}`);
+    void closeRestTimerNotification();
     setRestTimer(null);
   };
   const setRestSeconds = (seconds: number) => {
@@ -684,6 +735,13 @@ function Workout({ done }: { done: () => void }) {
     localStorage.setItem(`kirfit_rest_${s.id}`, JSON.stringify(nextTimer));
     setClockNow(nextTimer.startedAt);
     setRestTimer(nextTimer);
+    if (
+      !notificationPromptShownRef.current &&
+      shouldPromptForRestNotifications()
+    ) {
+      notificationPromptShownRef.current = true;
+      setNotificationDialogOpen(true);
+    }
   };
   const completedCount = s.exercises.filter(
     (exercise) => exercise.sets.length >= exercise.plannedSets,
@@ -943,6 +1001,17 @@ function Workout({ done }: { done: () => void }) {
         onCancel={() => setWorkoutAction(null)}
         onConfirm={() => void cancelOrRestart()}
       />
+      <RestNotificationDialog
+        open={notificationDialogOpen}
+        onClose={() => setNotificationDialogOpen(false)}
+        onGranted={() => {
+          if (!restTimer) return;
+          const seconds = remainingRestSeconds(restTimer);
+          const endsAt = restTimer.startedAt + restTimer.durationSeconds * 1000;
+          const copy = restNotificationText(seconds, endsAt);
+          void showRestTimerNotification(copy.title, copy.body, endsAt);
+        }}
+      />
     </section>
   );
 }
@@ -996,6 +1065,96 @@ function ConfirmDialog({
             onClick={onConfirm}
           >
             {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+function RestNotificationDialog({
+  open,
+  onClose,
+  onGranted,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onGranted: () => void;
+}) {
+  const [dontShowAgain, setDontShowAgain] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (!open) return;
+    setDontShowAgain(false);
+    setBusy(false);
+    setError(
+      restNotificationPermission() === "denied"
+        ? tr("restNotificationBlocked")
+        : "",
+    );
+  }, [open]);
+  if (!open) return null;
+  const close = () => {
+    if (dontShowAgain) setRestNotificationPromptDismissed(true);
+    onClose();
+  };
+  return (
+    <div
+      className="settings-popup-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="rest-notification-dialog-title"
+      onClick={() => !busy && close()}
+    >
+      <div
+        className="settings-popup confirm-popup notification-popup"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="settings-popup-title">
+          <b id="rest-notification-dialog-title">
+            {tr("restNotificationPermissionTitle")}
+          </b>
+          <button type="button" disabled={busy} onClick={close}>
+            <X />
+          </button>
+        </div>
+        <p>{tr("restNotificationPermissionText")}</p>
+        {error && <p className="error">{error}</p>}
+        <label className="notification-dismiss">
+          <input
+            type="checkbox"
+            checked={dontShowAgain}
+            onChange={(event) => setDontShowAgain(event.target.checked)}
+          />
+          <span>{tr("dontShowAgain")}</span>
+        </label>
+        <div className="confirm-actions">
+          <button type="button" disabled={busy} onClick={close}>
+            {tr("notNow")}
+          </button>
+          <button
+            type="button"
+            className="primary"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              setError("");
+              const permission = await requestRestNotificationPermission();
+              setBusy(false);
+              if (permission === "granted") {
+                setRestNotificationPromptDismissed(false);
+                onGranted();
+                onClose();
+              } else {
+                setError(
+                  permission === "unsupported"
+                    ? tr("restNotificationUnavailable")
+                    : tr("restNotificationBlocked"),
+                );
+              }
+            }}
+          >
+            {tr("allowNotifications")}
           </button>
         </div>
       </div>
@@ -1729,6 +1888,11 @@ function Admin({ logout }: { logout: () => void }) {
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [passkeyError, setPasskeyError] = useState("");
   const [passkeyAdded, setPasskeyAdded] = useState(false);
+  const [restPermission, setRestPermission] = useState(() =>
+    restNotificationPermission(),
+  );
+  const [restNotificationDialogOpen, setRestNotificationDialogOpen] =
+    useState(false);
   const passkeysSupported = typeof window.PublicKeyCredential !== "undefined";
   const load = () => api("/exercises").then(setItems);
   useEffect(() => {
@@ -1840,6 +2004,33 @@ function Admin({ logout }: { logout: () => void }) {
       <Card title={tr("language")}>
         <LanguageSwitcher />
       </Card>
+      <Card title={tr("restNotifications")}>
+        <p>
+          {restPermission === "granted"
+            ? tr("restNotificationEnabled")
+            : restPermission === "unsupported"
+              ? tr("restNotificationUnavailable")
+              : tr("restNotificationsDescription")}
+        </p>
+        {restPermission !== "granted" &&
+          restPermission !== "unsupported" && (
+            <button
+              type="button"
+              className="primary"
+              onClick={() => setRestNotificationDialogOpen(true)}
+            >
+              <Bell /> {tr("configureNotifications")}
+            </button>
+          )}
+      </Card>
+      <RestNotificationDialog
+        open={restNotificationDialogOpen}
+        onClose={() => {
+          setRestNotificationDialogOpen(false);
+          setRestPermission(restNotificationPermission());
+        }}
+        onGranted={() => setRestPermission("granted")}
+      />
       <Card title={tr("trainingDays")}>
         {weekdays && (
           <>
