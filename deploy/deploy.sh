@@ -11,7 +11,6 @@ git checkout -f main
 git reset --hard origin/main
 export APP_VERSION="$(git rev-parse --short HEAD)"
 docker compose build --pull app seed
-docker compose up -d db
 docker compose run --rm seed
 docker compose up -d app
 docker compose ps

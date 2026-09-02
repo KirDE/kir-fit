@@ -1,6 +1,7 @@
 services:
   db:
     image: postgres:17-alpine
+    profiles: [legacy-db]
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -30,8 +31,6 @@ services:
       APP_VERSION: ${APP_VERSION:-local}
       UPLOAD_DIR: /app/uploads
       PORT: 3000
-    depends_on:
-      db: {condition: service_healthy}
     volumes:
       - uploads:/app/uploads
     ports:
@@ -47,8 +46,6 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       APP_USERNAME: ${APP_USERNAME}
       APP_PASSWORD: ${APP_PASSWORD}
-    depends_on:
-      db: {condition: service_healthy}
     command: ["sh","-c","npm exec -w @kir-fit/api -- prisma migrate deploy --schema prisma/schema.prisma && npm exec -w @kir-fit/api -- tsx prisma/seed.ts"]
     networks: [internal]
 volumes:
@@ -56,3 +53,7 @@ volumes:
   uploads:
 networks:
   internal:
+    ipam:
+      config:
+        - subnet: 172.29.21.0/24
+          gateway: 172.29.21.1

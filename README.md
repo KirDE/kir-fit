@@ -6,7 +6,7 @@ Mobile-first personal strength-training tracker for `fit.kir-it.de`. It includes
 
 - React + TypeScript + Vite PWA
 - Express REST API with Zod validation and JWT authentication
-- PostgreSQL + Prisma migrations
+- Plesk-managed PostgreSQL + Prisma migrations
 - Docker Compose
 
 The domains are separated in the data model (`workouts`, `body weight`, machines and future modules) so nutrition and other health modules can be added without coupling them to workout sessions. Workout records snapshot template settings and names so historical data stays correct when programs change.
@@ -37,7 +37,7 @@ Google sign-in uses Google Identity Services. Create an OAuth 2.0 **Web applicat
 
 Without an account the app runs fully in guest mode. Workouts, history, exercise progress and body weight are stored in browser `localStorage`; the UI permanently warns that browser-local data can be lost.
 
-Production uses `/opt/kir-fit/repo`, a root-owned `.env`, Docker Compose, and a Plesk/nginx reverse proxy to `127.0.0.1:3210`. GitHub Actions runs type checks, tests, a production build and a Docker build before invoking `deploy/deploy.sh`. The script is locked, migrates before startup, seeds idempotently, restarts only the app stack, and checks the local health endpoint. CI then checks the public HTTPS endpoint.
+Production uses `/opt/kir-fit/repo`, a root-owned `.env`, Docker Compose for the application, the PostgreSQL server managed by Plesk, and a Plesk/nginx reverse proxy to `127.0.0.1:3210`. The Compose network has a fixed private subnet so PostgreSQL can grant narrowly scoped access only to the Fit database user. The old containerized database remains behind the `legacy-db` profile for rollback and is not started during normal deploys. GitHub Actions runs type checks, tests, a production build and a Docker build before invoking `deploy/deploy.sh`. The script is locked, migrates before startup, seeds idempotently, restarts only the app stack, and checks the local health endpoint. CI then checks the public HTTPS endpoint.
 
 ## Reliability notes
 
