@@ -12,10 +12,10 @@ import {
   EllipsisVertical,
   RotateCcw,
   Settings,
-  Scale,
   SlidersHorizontal,
   Trash2,
   Undo2,
+  Utensils,
   WifiOff,
   X,
 } from "lucide-react";
@@ -43,6 +43,7 @@ import {
 import { getLanguage, setLanguage, tr } from "./i18n";
 import { paddedDomain } from "./chart";
 import type { Exercise, Session, WorkoutExercise } from "./types";
+import { Nutrition, NutritionDashboardCard } from "./Nutrition";
 import "./styles.css";
 import { registerSW } from "virtual:pwa-register";
 import "./enhancements.css";
@@ -58,7 +59,13 @@ registerSW({
       .catch(() => undefined);
   },
 });
-type View = "home" | "workout" | "history" | "progress" | "weight" | "admin";
+type View =
+  | "home"
+  | "workout"
+  | "history"
+  | "nutrition"
+  | "progress"
+  | "admin";
 const dayNames = [
   "Sunday",
   "Monday",
@@ -175,13 +182,14 @@ function App() {
         {view === "home" && (
           <Dashboard
             start={() => setView("workout")}
-            weight={() => setView("weight")}
+            weight={() => setView("progress")}
+            nutrition={() => setView("nutrition")}
           />
         )}{" "}
         {view === "workout" && <Workout done={() => setView("home")} />}{" "}
         {view === "history" && <History resume={() => setView("workout")} />}{" "}
+        {view === "nutrition" && <Nutrition />}{" "}
         {view === "progress" && <Progress />}{" "}
-        {view === "weight" && <BodyWeight />}{" "}
         {view === "admin" && (
           <Admin
             logout={() => {
@@ -197,8 +205,8 @@ function App() {
           {[
             ["home", House, tr("home")],
             ["history", HistoryIcon, tr("history")],
+            ["nutrition", Utensils, tr("nutrition")],
             ["progress", ChartIcon, tr("progress")],
-            ["weight", Scale, tr("weight")],
             ["admin", Settings, tr("settings")],
           ].map(([v, I, l]: any) => (
             <button
@@ -505,9 +513,11 @@ function Login({ done }: { done: () => void }) {
 function Dashboard({
   start,
   weight,
+  nutrition,
 }: {
   start: () => void;
   weight: () => void;
+  nutrition: () => void;
 }) {
   const [d, setD] = useState<any>();
   useEffect(() => {
@@ -537,6 +547,7 @@ function Dashboard({
           {tr(d.hasActiveWorkout ? "continueWorkout" : "startWorkout")}
         </button>
       </div>
+      <NutritionDashboardCard open={nutrition} />
       <div className="grid">
         <Card title={tr("bodyWeight")} onClick={weight}>
           <strong>
@@ -1605,6 +1616,7 @@ function Progress() {
           </Card>
         </>
       )}
+      <BodyWeight embedded />
     </section>
   );
 }
@@ -1651,7 +1663,7 @@ function Chart({
     </div>
   );
 }
-function BodyWeight() {
+function BodyWeight({ embedded = false }: { embedded?: boolean }) {
   const [rows, setRows] = useState<any[]>(),
     [weight, setWeight] = useState<number | "">(""),
     [notes, setNotes] = useState("");
@@ -1682,8 +1694,8 @@ function BodyWeight() {
   );
   if (!rows) return <Loading />;
   return (
-    <section>
-      <Header title={tr("bodyWeight")} />
+    <section className={embedded ? "weight-in-progress" : ""}>
+      {embedded ? <h2>{tr("bodyWeight")}</h2> : <Header title={tr("bodyWeight")} />}
       <div className="hero compact">
         <p className="eyebrow">{tr("current")}</p>
         <h1>
@@ -1751,6 +1763,9 @@ function Admin({ logout }: { logout: () => void }) {
   }>();
   const [profileSaved, setProfileSaved] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const [nutritionProfile, setNutritionProfile] = useState<any>();
+  const [nutritionSaved, setNutritionSaved] = useState(false);
+  const [nutritionError, setNutritionError] = useState("");
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [passkeyError, setPasskeyError] = useState("");
   const [passkeyAdded, setPasskeyAdded] = useState(false);
@@ -1759,6 +1774,11 @@ function Admin({ logout }: { logout: () => void }) {
   useEffect(() => {
     load();
     api("/settings/program").then((x) => setWeekdays(x.preferredWeekdays));
+    api("/settings/nutrition")
+      .then(setNutritionProfile)
+      .catch((error) =>
+        setNutritionError(error.message || tr("nutritionSettingsFailed")),
+      );
     if (isGuest())
       api("/dashboard").then((x) => setDisplayName(x.displayName || ""));
     else
@@ -1807,6 +1827,178 @@ function Admin({ logout }: { logout: () => void }) {
         >
           {profileSaved ? tr("saved") : tr("saveProfile")}
         </button>
+      </Card>
+
+      <Card title={tr("nutritionGoals")}>
+        {nutritionProfile ? (
+          <div className="nutrition-settings-form">
+            <div className="nutrition-settings-grid">
+              <label>
+                {tr("height")}
+                <span className="input-with-suffix">
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={100}
+                    max={250}
+                    value={nutritionProfile.heightCm ?? ""}
+                    onChange={(event) => {
+                      setNutritionSaved(false);
+                      setNutritionProfile((current: any) => ({
+                        ...current,
+                        heightCm: event.target.value
+                          ? Number(event.target.value)
+                          : null,
+                      }));
+                    }}
+                  />
+                  <b>{tr("centimetersShort")}</b>
+                </span>
+                <small>{tr("heightRange")}</small>
+              </label>
+              <label>
+                {tr("goalWeight")}
+                <span className="input-with-suffix">
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={30}
+                    max={500}
+                    step={0.1}
+                    value={nutritionProfile.goalWeightKg ?? ""}
+                    onChange={(event) => {
+                      setNutritionSaved(false);
+                      setNutritionProfile((current: any) => ({
+                        ...current,
+                        goalWeightKg: event.target.value
+                          ? Number(event.target.value)
+                          : null,
+                      }));
+                    }}
+                  />
+                  <b>{tr("kg")}</b>
+                </span>
+                <small>{tr("goalWeightRange")}</small>
+              </label>
+            </div>
+            <fieldset className="nutrition-target-mode">
+              <legend>{tr("proteinTargetMode")}</legend>
+              <label>
+                <input
+                  type="radio"
+                  name="protein-target-mode"
+                  checked={nutritionProfile.proteinTargetMode === "automatic"}
+                  onChange={() => {
+                    setNutritionSaved(false);
+                    setNutritionProfile((current: any) => ({
+                      ...current,
+                      proteinTargetMode: "automatic",
+                    }));
+                  }}
+                />
+                {tr("automaticProteinTarget")}
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="protein-target-mode"
+                  checked={nutritionProfile.proteinTargetMode === "manual"}
+                  onChange={() => {
+                    setNutritionSaved(false);
+                    setNutritionProfile((current: any) => ({
+                      ...current,
+                      proteinTargetMode: "manual",
+                    }));
+                  }}
+                />
+                {tr("manualProteinTarget")}
+              </label>
+            </fieldset>
+            {nutritionProfile.proteinTargetMode === "manual" && (
+              <label>
+                {tr("manualProteinTarget")}
+                <span className="input-with-suffix">
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={20}
+                    max={400}
+                    value={nutritionProfile.manualProteinTargetGrams ?? ""}
+                    onChange={(event) => {
+                      setNutritionSaved(false);
+                      setNutritionProfile((current: any) => ({
+                        ...current,
+                        manualProteinTargetGrams: event.target.value
+                          ? Number(event.target.value)
+                          : null,
+                      }));
+                    }}
+                  />
+                  <b>g</b>
+                </span>
+                <small>{tr("manualProteinRange")}</small>
+              </label>
+            )}
+            {nutritionProfile.calculation && (
+              <div className="nutrition-target-summary">
+                <strong>
+                  {nutritionProfile.calculation.targetGrams ?? "—"} g
+                </strong>
+                {nutritionProfile.calculation.currentWeightKg && (
+                  <span>
+                    {tr("currentWeightLabel")}: {nutritionProfile.calculation.currentWeightKg} {tr("kg")}
+                  </span>
+                )}
+                {nutritionProfile.calculation.recommendedRangeGrams && (
+                  <span>
+                    {tr("recommendedRange")}: {nutritionProfile.calculation.recommendedRangeGrams.min}–{nutritionProfile.calculation.recommendedRangeGrams.max} g
+                  </span>
+                )}
+                <small>{tr("proteinFormula")}</small>
+              </div>
+            )}
+            <p className="nutrition-disclaimer">{tr("proteinDisclaimer")}</p>
+            {nutritionError && <p className="error">{nutritionError}</p>}
+            <button
+              className="primary"
+              disabled={
+                nutritionProfile.heightCm === null ||
+                nutritionProfile.heightCm < 100 ||
+                nutritionProfile.heightCm > 250 ||
+                (nutritionProfile.goalWeightKg !== null &&
+                  (nutritionProfile.goalWeightKg < 30 ||
+                    nutritionProfile.goalWeightKg > 500)) ||
+                (nutritionProfile.proteinTargetMode === "manual" &&
+                  (nutritionProfile.manualProteinTargetGrams === null ||
+                    nutritionProfile.manualProteinTargetGrams < 20 ||
+                    nutritionProfile.manualProteinTargetGrams > 400))
+              }
+              onClick={async () => {
+                setNutritionError("");
+                try {
+                  const result = await api("/settings/nutrition", {
+                    method: "PATCH",
+                    body: JSON.stringify({
+                      heightCm: nutritionProfile.heightCm,
+                      goalWeightKg: nutritionProfile.goalWeightKg,
+                      proteinTargetMode: nutritionProfile.proteinTargetMode,
+                      manualProteinTargetGrams:
+                        nutritionProfile.manualProteinTargetGrams,
+                    }),
+                  });
+                  setNutritionProfile(result);
+                  setNutritionSaved(true);
+                } catch (error: any) {
+                  setNutritionError(tr("nutritionSettingsFailed"));
+                }
+              }}
+            >
+              {nutritionSaved ? tr("saved") : tr("saveNutritionGoals")}
+            </button>
+          </div>
+        ) : (
+          !nutritionError && <Loading />
+        )}
       </Card>
 
       {accountSecurity?.googleLinked &&
