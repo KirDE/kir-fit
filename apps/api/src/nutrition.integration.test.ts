@@ -114,7 +114,7 @@ describe.skipIf(!hasDatabase)("nutrition API", () => {
     expect(automatic.body.calculation.targetGrams).toBe(120);
   });
 
-  it("allows rate-limited ephemeral guest analysis without retaining the photo", async () => {
+  it("queues rate-limited guest analysis and deletes it on request", async () => {
     const image = await sharp({
       create: { width: 64, height: 48, channels: 3, background: "green" },
     })
@@ -131,13 +131,29 @@ describe.skipIf(!hasDatabase)("nutrition API", () => {
       .set("X-Kirfit-Device", "d9ad279e-367f-478d-8390-bd4f05d3a91f")
       .set("Idempotency-Key", "guest-auth-check-2")
       .attach("image", image, "meal.jpg");
-    expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({
+    expect(response.status).toBe(202);
+    let result: any;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const status = await request(api.app)
+        .get(`/api/nutrition/photos/${response.body.analysisId}/status`)
+        .set("X-Kirfit-Device", "d9ad279e-367f-478d-8390-bd4f05d3a91f");
+      result = status.body;
+      if (result.status !== "processing") break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(result).toMatchObject({
       status: "manual_required",
       failureCode: "not_configured",
       manualEntryAvailable: true,
     });
     const store = new PrivateFoodPhotoStore(process.env.NUTRITION_PRIVATE_DIR);
+    await expect(store.readManifest(response.body.analysisId)).resolves.toMatchObject({
+      status: "manual_required",
+    });
+    await request(api.app)
+      .delete(`/api/nutrition/photos/${response.body.analysisId}`)
+      .set("X-Kirfit-Device", "d9ad279e-367f-478d-8390-bd4f05d3a91f")
+      .expect(204);
     await expect(store.readManifest(response.body.analysisId)).rejects.toMatchObject({
       code: "not_found",
     });

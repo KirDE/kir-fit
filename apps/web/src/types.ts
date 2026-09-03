@@ -55,3 +55,16 @@ export type MealAnalysis = {
   thumbnailUrl?: string;
   providerResult?: unknown;
 };
+
+export type PhotoAnalysisJob = {
+  analysisId: string;
+  status: "processing" | "completed" | "manual_required";
+  createdAt: string;
+  analysis?: unknown;
+  result?: unknown;
+  failureCode?: string;
+  message?: string;
+  retryable?: boolean;
+  thumbnailUrl?: string | null;
+  metadata?: { clarificationRound?: number } & Record<string, unknown>;
+};

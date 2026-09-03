@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
+  Clock3,
   ChevronLeft,
   ChevronRight,
   ImagePlus,
   Pencil,
   Plus,
+  RefreshCw,
   Trash2,
   Utensils,
   X,
@@ -14,12 +16,15 @@ import { getLanguage } from "./i18n";
 import { token } from "./api";
 import {
   analyzeMeal,
+  analysisHeaders,
   clarifyMeal,
+  deletePhotoAnalysis,
   deleteNutritionEntry,
   emptyNutrients,
   localDate,
   moveLocalDate,
   nutritionDay,
+  photoAnalysisJobs,
   saveNutritionEntry,
   sumItems,
 } from "./nutrition";
@@ -29,6 +34,7 @@ import type {
   NutritionDay,
   NutritionEntry,
   NutritionItem,
+  PhotoAnalysisJob,
 } from "./types";
 
 const copy = {
@@ -51,6 +57,13 @@ const copy = {
     gallery: "Choose photo",
     manual: "Enter manually",
     analyzing: "Estimating food and portions…",
+    queued: "Photo added. Analysis continues in the background.",
+    processing: "Analysis in progress",
+    answerQuestions: "Answer questions",
+    reviewEstimate: "Review estimate",
+    analysisFailedShort: "Analysis failed — enter manually",
+    queuedHint: "You can close Fit and return later.",
+    cancelAnalysis: "Delete pending photo",
     estimated: "Estimated from a photo — review before saving.",
     privatePhoto: "Your photo is processed privately and is not published.",
     analysisFailed: "Photo analysis is unavailable. You can enter the meal manually.",
@@ -107,6 +120,13 @@ const copy = {
     gallery: "Foto auswählen",
     manual: "Manuell eingeben",
     analyzing: "Lebensmittel und Portionen werden geschätzt…",
+    queued: "Foto hinzugefügt. Die Analyse läuft im Hintergrund weiter.",
+    processing: "Analyse läuft",
+    answerQuestions: "Fragen beantworten",
+    reviewEstimate: "Schätzung prüfen",
+    analysisFailedShort: "Analyse fehlgeschlagen — manuell eingeben",
+    queuedHint: "Du kannst Fit schließen und später zurückkehren.",
+    cancelAnalysis: "Ausstehendes Foto löschen",
     estimated: "Vom Foto geschätzt — vor dem Speichern prüfen.",
     privatePhoto: "Das Foto wird privat verarbeitet und nicht veröffentlicht.",
     analysisFailed: "Die Fotoanalyse ist nicht verfügbar. Du kannst das Essen manuell eingeben.",
@@ -163,6 +183,13 @@ const copy = {
     gallery: "Выбрать фото",
     manual: "Ввести вручную",
     analyzing: "Оцениваю состав и размер порций…",
+    queued: "Фото добавлено. Анализ продолжается в фоне.",
+    processing: "Идёт анализ",
+    answerQuestions: "Ответить на вопросы",
+    reviewEstimate: "Проверить оценку",
+    analysisFailedShort: "Не удалось распознать — ввести вручную",
+    queuedHint: "Fit можно закрыть и вернуться позже.",
+    cancelAnalysis: "Удалить необработанное фото",
     estimated: "Оценка по фотографии — проверьте перед сохранением.",
     privatePhoto: "Фото обрабатывается приватно и нигде не публикуется.",
     analysisFailed: "Анализ фото недоступен. Можно ввести блюдо вручную.",
@@ -302,19 +329,27 @@ export function NutritionDashboardCard({ open }: { open: () => void }) {
 export function Nutrition() {
   const [date, setDate] = useState(localDate());
   const [day, setDay] = useState<NutritionDay>();
+  const [jobs, setJobs] = useState<PhotoAnalysisJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [editor, setEditor] = useState<NutritionEntry | "new">();
+  const [editor, setEditor] = useState<NutritionEntry | PhotoAnalysisJob | "new">();
   const [deleteTarget, setDeleteTarget] = useState<NutritionEntry>();
   const load = () => {
     setLoading(true);
     setError("");
-    nutritionDay(date)
-      .then(setDay)
+    Promise.all([nutritionDay(date), photoAnalysisJobs().catch(() => [])])
+      .then(([nextDay, nextJobs]) => { setDay(nextDay); setJobs(nextJobs); })
       .catch(() => setError(nt("loadFailed")))
       .finally(() => setLoading(false));
   };
   useEffect(load, [date]);
+  useEffect(() => {
+    if (!jobs.some((job) => job.status === "processing")) return;
+    const timer = window.setInterval(() => {
+      photoAnalysisJobs().then(setJobs).catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [jobs]);
   const percent = day?.proteinTarget
     ? Math.round((day.totals.proteinGrams / day.proteinTarget) * 100)
     : 0;
@@ -359,6 +394,12 @@ export function Nutrition() {
           <MacroGrid nutrients={day.totals} />
           <button className="primary nutrition-add" onClick={() => setEditor("new")}><Plus /> {nt("addFood")}</button>
           <div className="nutrition-entries">
+            {jobs.map((job) => <PhotoAnalysisCard
+              key={job.analysisId}
+              job={job}
+              onOpen={() => setEditor(job)}
+              onDelete={async () => { await deletePhotoAnalysis(job.analysisId); load(); }}
+            />)}
             {grouped.map((group) => (
               <div key={group.type} className="nutrition-meal-group">
                 <h2>{nt(group.type)}</h2>
@@ -372,14 +413,52 @@ export function Nutrition() {
                 ))}
               </div>
             ))}
-            {!day.entries.length && <div className="nutrition-empty"><Utensils /><p>{nt("empty")}</p></div>}
+            {!day.entries.length && !jobs.length && <div className="nutrition-empty"><Utensils /><p>{nt("empty")}</p></div>}
           </div>
         </>
       )}
-      {editor && <MealEditor value={editor === "new" ? undefined : editor} date={date} onClose={() => setEditor(undefined)} onSaved={() => { setEditor(undefined); load(); }} onDelete={editor === "new" ? undefined : () => setDeleteTarget(editor)} />}
+      {editor && <MealEditor
+        value={editor !== "new" && "id" in editor ? editor : undefined}
+        job={editor !== "new" && "analysisId" in editor ? editor : undefined}
+        date={date}
+        onClose={() => setEditor(undefined)}
+        onQueued={() => { setEditor(undefined); load(); }}
+        onSaved={() => { setEditor(undefined); load(); }}
+        onDelete={editor !== "new" && "id" in editor ? () => setDeleteTarget(editor) : undefined}
+      />}
       {deleteTarget && <ConfirmDelete entry={deleteTarget} onCancel={() => setDeleteTarget(undefined)} onDeleted={() => { setDeleteTarget(undefined); setEditor(undefined); load(); }} />}
     </section>
   );
+}
+
+function PhotoAnalysisCard({ job, onOpen, onDelete }: {
+  job: PhotoAnalysisJob;
+  onOpen: () => void;
+  onDelete: () => void;
+}) {
+  const normalized = job.result || job.analysis
+    ? normalizeMealAnalysis(job)
+    : undefined;
+  const label = job.status === "processing"
+    ? nt("processing")
+    : job.status === "manual_required"
+      ? nt("analysisFailedShort")
+      : normalized?.questions.length
+        ? nt("answerQuestions")
+        : nt("reviewEstimate");
+  return <div className={`nutrition-entry nutrition-analysis-card ${job.status}`}>
+    <button className="nutrition-analysis-open" onClick={onOpen}>
+      {job.thumbnailUrl
+        ? <PrivateThumbnail src={job.thumbnailUrl} />
+        : <span className="nutrition-entry-icon"><Clock3 /></span>}
+      <span>
+        <b>{normalized?.title || nt("processing")}</b>
+        <small>{label}</small>
+      </span>
+      {job.status === "processing" ? <RefreshCw className="nutrition-spin" /> : <ChevronRight />}
+    </button>
+    <button className="nutrition-analysis-delete" aria-label={nt("cancelAnalysis")} onClick={onDelete}><X /></button>
+  </div>;
 }
 
 function PrivateThumbnail({ src }: { src: string }) {
@@ -391,8 +470,7 @@ function PrivateThumbnail({ src }: { src: string }) {
     }
     const controller = new AbortController();
     let createdUrl: string | undefined;
-    const headers = new Headers();
-    if (token()) headers.set("Authorization", `Bearer ${token()}`);
+    const headers = analysisHeaders();
     fetch(src, { headers, signal: controller.signal })
       .then((response) => {
         if (!response.ok) throw new Error("thumbnail-unavailable");
@@ -429,26 +507,49 @@ function MacroGrid({ nutrients }: { nutrients: Nutrients }) {
   </div>;
 }
 
-function MealEditor({ value, date, onClose, onSaved, onDelete }: { value?: NutritionEntry; date: string; onClose: () => void; onSaved: () => void; onDelete?: () => void }) {
-  const [stage, setStage] = useState<"choose" | "loading" | "questions" | "review">(value ? "review" : "choose");
-  const [analysis, setAnalysis] = useState<MealAnalysis>();
-  const [items, setItems] = useState<NutritionItem[]>(value?.items?.length ? structuredClone(value.items) : [emptyItem()]);
-  const [title, setTitle] = useState(value?.title || "");
+function MealEditor({ value, job, date, onClose, onQueued, onSaved, onDelete }: {
+  value?: NutritionEntry;
+  job?: PhotoAnalysisJob;
+  date: string;
+  onClose: () => void;
+  onQueued: () => void;
+  onSaved: () => void;
+  onDelete?: () => void;
+}) {
+  const initialAnalysis = job && (job.result || job.analysis)
+    ? normalizeMealAnalysis(job)
+    : undefined;
+  const initialStage = value
+    ? "review"
+    : job?.status === "processing"
+      ? "loading"
+      : initialAnalysis?.questions.length && initialAnalysis.clarificationRound < 2
+        ? "questions"
+        : job
+          ? "review"
+          : "choose";
+  const [stage, setStage] = useState<"choose" | "loading" | "questions" | "review">(initialStage);
+  const [analysis, setAnalysis] = useState<MealAnalysis | undefined>(initialAnalysis);
+  const [items, setItems] = useState<NutritionItem[]>(value?.items?.length
+    ? structuredClone(value.items)
+    : initialAnalysis?.items?.length
+      ? structuredClone(initialAnalysis.items)
+      : [emptyItem()]);
+  const [title, setTitle] = useState(value?.title || initialAnalysis?.title || "");
   const [mealType, setMealType] = useState<NutritionEntry["mealType"]>(value?.mealType || "snack");
   const [consumedPercent, setConsumedPercent] = useState(value?.consumedPercent ?? 100);
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [error, setError] = useState("");
+  const [error, setError] = useState(job?.status === "manual_required" ? nt("analysisFailed") : "");
   const [saving, setSaving] = useState(false);
   const galleryRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const chooseFile = async (file?: File) => {
     if (!file) return;
     if (!navigator.onLine) { setError(nt("offlinePhoto")); return; }
-    setError(""); setStage("loading");
+    setError("");
     try {
-      const next = normalizeMealAnalysis(await analyzeMeal(file));
-      setAnalysis(next); setTitle(next.title); setItems(next.items);
-      setStage(next.questions.length ? "questions" : "review");
+      await analyzeMeal(file);
+      onQueued();
     } catch (reason: any) {
       setError(reason.message === "image-too-large" ? nt("tooLarge") : reason.message === "invalid-image" ? nt("invalidImage") : nt("analysisFailed"));
       setStage("choose");
@@ -470,12 +571,12 @@ function MealEditor({ value, date, onClose, onSaved, onDelete }: { value?: Nutri
         <button onClick={() => setStage("review")}><Pencil />{nt("manual")}</button>
         <p>{nt("privatePhoto")}</p>
       </div>}
-      {stage === "loading" && <div className="nutrition-analyzing" aria-live="polite"><i /><p>{nt("analyzing")}</p></div>}
+      {stage === "loading" && <div className="nutrition-analyzing" aria-live="polite"><i /><p>{nt("processing")}</p><small>{nt("queuedHint")}</small></div>}
       {stage === "questions" && analysis && <Clarifications analysis={analysis} answers={answers} setAnswers={setAnswers} onManual={() => setStage("review")} onContinue={async () => {
         if (analysis.clarificationRound >= 2) { setStage("review"); return; }
-        setStage("loading"); setError("");
-        try { const next = normalizeMealAnalysis(await clarifyMeal(analysis, answers)); next.thumbnailUrl ||= analysis.thumbnailUrl; setAnalysis(next); setTitle(next.title); setItems(next.items); setAnswers({}); setStage(next.questions.length && next.clarificationRound < 2 ? "questions" : "review"); }
-        catch { setError(nt("analysisFailed")); setStage("review"); }
+        setError("");
+        try { await clarifyMeal(analysis, answers); onQueued(); }
+        catch { setError(nt("analysisFailed")); }
       }} />}
       {stage === "review" && <div className="nutrition-review">
         {analysis && <div className="nutrition-estimate"><b>{nt("estimated")}</b>{analysis.uncertainty && <p><strong>{nt("uncertainty")}:</strong> {analysis.uncertainty}</p>}{analysis.assumptions.length > 0 && <details><summary>{nt("assumptions")}</summary><ul>{analysis.assumptions.map((item, index) => <li key={index}>{item}</li>)}</ul></details>}</div>}
@@ -489,7 +590,7 @@ function MealEditor({ value, date, onClose, onSaved, onDelete }: { value?: Nutri
         {consumedPercent === 0 && <p className="nutrition-alert">{nt("discardZero")}</p>}
         <button className="primary nutrition-save" disabled={saving || consumedPercent === 0 || !title.trim() || items.some(item => !item.name.trim())} onClick={async () => {
           setSaving(true); setError("");
-          try { await saveNutritionEntry({ id: value?.id, occurredAt, mealType, title: title.trim(), consumedPercent, items, ...full, thumbnailUrl: analysis?.thumbnailUrl || value?.thumbnailUrl, assumptions: analysis?.assumptions || value?.assumptions, uncertainty: analysis?.uncertainty || value?.uncertainty, originalAnalysis: value?.originalAnalysis || analysis }); onSaved(); }
+          try { await saveNutritionEntry({ id: value?.id, occurredAt, mealType, title: title.trim(), consumedPercent, items, ...full, thumbnailUrl: analysis?.thumbnailUrl || value?.thumbnailUrl, assumptions: analysis?.assumptions || value?.assumptions, uncertainty: analysis?.uncertainty || value?.uncertainty, originalAnalysis: value?.originalAnalysis || analysis }); if (!token() && analysis) await deletePhotoAnalysis(analysis.id).catch(() => undefined); onSaved(); }
           catch { setError(nt("saveFailed")); setSaving(false); }
         }}>{nt("save")}</button>
         {onDelete && <button className="nutrition-delete" onClick={onDelete}><Trash2 /> {nt("delete")}</button>}

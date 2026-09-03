@@ -12,23 +12,27 @@ rate limiting and isolation.
 - `POST /api/nutrition/photos/analyze`
   - multipart field: `image`
   - required header: `Idempotency-Key` (8–128 safe characters; keep it stable for retries)
-  - returns `analysisId`, `status`, `analysis`, `metadata`, and a thumbnail;
-    authenticated thumbnails use an owner-checked URL, while guest thumbnails
-    are returned inline and retained only in browser-local storage
+  - returns `202` with `analysisId`, `status=processing` and an owner-checked
+    thumbnail URL as soon as the image has been normalized; provider processing
+    continues in the background
   - `status=manual_required` includes `failureCode`, `retryable` and
     `manualEntryAvailable=true`
+- `GET /api/nutrition/photos`
+  - lists the owner's unfinalized photo jobs newest first
+- `GET /api/nutrition/photos/:analysisId/status`
+  - returns `202` while processing and `200` once completed or when manual
+    review is required
 - `GET /api/nutrition/photos/:analysisId/thumbnail`
-  - returns JPEG only when the bearer user owns the analysis
+  - returns JPEG only when the bearer user or opaque guest device owns the job
 - `DELETE /api/nutrition/photos/:analysisId`
   - removes pending analysis and retained thumbnail
 - `POST /api/nutrition/photos/analyze/:analysisId/clarify`
   - required new `Idempotency-Key` header
   - JSON: `{ "answers": { "question_id": "answer" }, "priorAnalysis": ... }`
-  - authenticated analysis ignores `priorAnalysis` and uses its owner-protected
-    server result; stateless guest clarification validates `priorAnalysis`
-    against the strict schema before sending it to the provider
-  - returns the same envelope as initial analysis and does not charge twice for
-    a completed retry with the same idempotency key
+  - ignores `priorAnalysis` and uses the owner-protected server result
+  - queues the refinement and returns `202`; the client follows it through the
+    list or status endpoint
+  - does not charge twice for a completed retry with the same idempotency key
 
 The structured `analysis` (also returned as the rolling-UI alias `result`) contains foods, gram and nutrient ranges, totals,
 assumptions, alternatives, confidence and required clarification questions.
@@ -58,7 +62,10 @@ server-side manifest.
   refusal, malformed output and provider failure.
 - Pending thumbnails/manifests expire after 24 hours; cleanup runs at startup and
   hourly.
-- Guest jobs are deleted before the analysis request completes. Neither the raw
-  photo nor the structured AI result remains on the server.
+- Authenticated and guest pending jobs retain a private thumbnail and structured
+  result for at most 24 hours so the questions can be answered asynchronously.
+  Guest ownership is isolated by the opaque device identifier and request IP.
+  Saving or explicitly deleting the job removes it from the pending list; stale
+  jobs are removed automatically.
 - The `nutrition_private` Docker volume is separate from public `/uploads` and
   must be included in backup/restore alongside PostgreSQL.

@@ -53,6 +53,23 @@ async function photoForm() {
   return form;
 }
 
+async function waitForJob(
+  url: string,
+  analysisId: string,
+  headers: Record<string, string>,
+) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const response = await fetch(
+      `${url}/api/nutrition/photos/${analysisId}/status`,
+      { headers },
+    );
+    const body: any = await response.json();
+    if (body.status !== "processing") return body;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("analysis job did not finish");
+}
+
 describe("private nutrition photo routes", () => {
   it("analyzes once, ignores claimed MIME/extension and ownership-protects bytes", async () => {
     const analyze = vi.fn(async () => ({
@@ -74,9 +91,16 @@ describe("private nutrition photo routes", () => {
       headers,
       body: await photoForm(),
     });
-    expect(first.status).toBe(200);
+    expect(first.status).toBe(202);
     const body: any = await first.json();
-    expect(body).toMatchObject({ status: "completed", analysis: { summary: "Mixed salad" } });
+    expect(body).toMatchObject({ status: "processing" });
+    const completed = await waitForJob(url, body.analysisId, {
+      "x-test-owner": "owner-a",
+    });
+    expect(completed).toMatchObject({
+      status: "completed",
+      analysis: { summary: "Mixed salad" },
+    });
 
     const retry = await fetch(`${url}/api/nutrition/photos/analyze`, {
       method: "POST",
@@ -114,9 +138,12 @@ describe("private nutrition photo routes", () => {
       headers: { "x-test-owner": "owner-a", "Idempotency-Key": "request-1002" },
       body: await photoForm(),
     });
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     const body: any = await response.json();
-    expect(body).toMatchObject({
+    const failed = await waitForJob(url, body.analysisId, {
+      "x-test-owner": "owner-a",
+    });
+    expect(failed).toMatchObject({
       status: "manual_required",
       failureCode: "timeout",
       retryable: true,
@@ -163,6 +190,7 @@ describe("private nutrition photo routes", () => {
       body: await photoForm(),
     });
     const original: any = await uploaded.json();
+    await waitForJob(url, original.analysisId, { "x-test-owner": "owner-a" });
     const clarify = () =>
       fetch(`${url}/api/nutrition/photos/analyze/${original.analysisId}/clarify`, {
         method: "POST",
@@ -177,15 +205,70 @@ describe("private nutrition photo routes", () => {
         }),
       });
     const first = await clarify();
-    expect(first.status).toBe(200);
-    expect(await first.json()).toMatchObject({
+    expect(first.status).toBe(202);
+    const refinedBody = await waitForJob(url, original.analysisId, {
+      "x-test-owner": "owner-a",
+    });
+    expect(refinedBody).toMatchObject({
       result: { summary: "Salad with oil dressing" },
     });
     expect((await clarify()).status).toBe(200);
     expect(refine).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps guest analysis stateless and supports a validated clarification", async () => {
+  it("keeps the prior estimate and records the provider error when async clarification fails", async () => {
+    const url = await testServer({
+      analyze: async () => ({
+        analysis: mealAnalysisV1Fixtures[0],
+        metadata: {
+          provider: "fixture",
+          model: "fixture-v1",
+          schemaVersion: "meal-photo-v1",
+          latencyMs: 1,
+          inputTokens: null,
+          outputTokens: null,
+          estimatedCostUsd: null,
+        },
+      }),
+      refine: async () => {
+        throw new MealAnalysisProviderError(
+          "malformed_response",
+          "The updated estimate was incomplete",
+          true,
+        );
+      },
+    });
+    const ownerHeaders = { "x-test-owner": "owner-a" };
+    const uploaded = await fetch(`${url}/api/nutrition/photos/analyze`, {
+      method: "POST",
+      headers: { ...ownerHeaders, "Idempotency-Key": "request-1004" },
+      body: await photoForm(),
+    });
+    const queued: any = await uploaded.json();
+    await waitForJob(url, queued.analysisId, ownerHeaders);
+
+    const clarification = await fetch(
+      `${url}/api/nutrition/photos/analyze/${queued.analysisId}/clarify`,
+      {
+        method: "POST",
+        headers: {
+          ...ownerHeaders,
+          "Content-Type": "application/json",
+          "Idempotency-Key": "clarify-1004",
+        },
+        body: JSON.stringify({ answers: { sauce: "oil and vinegar" } }),
+      },
+    );
+    expect(clarification.status).toBe(202);
+    expect(await waitForJob(url, queued.analysisId, ownerHeaders)).toMatchObject({
+      status: "manual_required",
+      failureCode: "malformed_response",
+      retryable: true,
+      result: { summary: "Mixed salad" },
+    });
+  });
+
+  it("keeps guest analysis private and supports asynchronous clarification", async () => {
     const refined = {
       ...structuredClone(mealAnalysisV1Fixtures[0]),
       summary: "Guest clarified salad",
@@ -226,16 +309,19 @@ describe("private nutrition photo routes", () => {
       },
       body: await photoForm(),
     });
-    expect(uploaded.status).toBe(200);
+    expect(uploaded.status).toBe(202);
     const body: any = await uploaded.json();
-    expect(body.thumbnailUrl).toMatch(/^data:image\/jpeg;base64,/);
+    const completed = await waitForJob(url, body.analysisId, {
+      "x-test-owner": "guest-owner",
+    });
+    expect(completed.thumbnailUrl).toContain(`/api/nutrition/photos/${body.analysisId}/thumbnail`);
     expect(
       (
         await fetch(`${url}/api/nutrition/photos/${body.analysisId}/thumbnail`, {
           headers: { "x-test-owner": "guest-owner" },
         })
       ).status,
-    ).toBe(404);
+    ).toBe(200);
 
     const clarified = await fetch(
       `${url}/api/nutrition/photos/analyze/${body.analysisId}/clarify`,
@@ -253,8 +339,10 @@ describe("private nutrition photo routes", () => {
         }),
       },
     );
-    expect(clarified.status).toBe(200);
-    expect(await clarified.json()).toMatchObject({
+    expect(clarified.status).toBe(202);
+    expect(await waitForJob(url, body.analysisId, {
+      "x-test-owner": "guest-owner",
+    })).toMatchObject({
       status: "completed",
       analysis: { summary: "Guest clarified salad" },
       metadata: { clarificationRound: 1 },

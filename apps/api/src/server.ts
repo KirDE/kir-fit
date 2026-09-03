@@ -56,7 +56,17 @@ app.use(
   cors({ origin: process.env.ORIGIN?.split(",") || false, credentials: true }),
 );
 app.use(express.json({ limit: "1mb" }));
-app.use((pinoHttp as any)({ enabled: process.env.NODE_ENV !== "test" }));
+app.use((pinoHttp as any)({
+  enabled: process.env.NODE_ENV !== "test",
+  redact: {
+    paths: [
+      "req.headers.authorization",
+      "req.headers.cookie",
+      "req.headers.x-kirfit-device",
+    ],
+    censor: "[Redacted]",
+  },
+}));
 const asyncRoute =
   (fn: (req: any, res: any, next: any) => any) =>
   (req: any, res: any, next: any) =>
@@ -1210,6 +1220,7 @@ app.post(
     if (photoManifest) {
       await nutritionPhotoStore.update(photoManifest.analysisId, userId(req), {
         expiresAt: new Date("9999-12-31T23:59:59.999Z").toISOString(),
+        finalizedAt: new Date().toISOString(),
       });
     }
     res.status(201).json(serializeNutritionEntry(entry));

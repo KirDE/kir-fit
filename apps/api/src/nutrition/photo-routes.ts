@@ -12,7 +12,6 @@ import {
   createMealAnalysisProviderFromEnvironment,
   MealAnalysisProvider,
   MealAnalysisProviderError,
-  normalizeMealAnalysis,
 } from "./meal-analysis.js";
 
 type NutritionPhotoRouterOptions = {
@@ -66,6 +65,44 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
   );
   cleanupTimer.unref();
 
+  const launch = (manifest: Awaited<ReturnType<typeof store.requireOwned>>) => {
+    const flightKey = `${manifest.ownerId}\0job\0${manifest.analysisId}`;
+    if (inFlight.has(flightKey) || !manifest.pendingTask) return;
+    const operation = runPendingTask(manifest, store, provider)
+      .catch((error) => {
+        console.error(JSON.stringify({
+          event: "nutrition_analysis_job_failed",
+          analysisId: manifest.analysisId,
+          error: error instanceof Error ? error.message : String(error),
+        }));
+      })
+      .finally(() => inFlight.delete(flightKey));
+    inFlight.set(flightKey, operation);
+  };
+
+  void store.listPending().then((jobs) => jobs.forEach(launch)).catch(() => undefined);
+
+  router.get(
+    "/",
+    asyncHandler(async (request, response) => {
+      const jobs = await store.listByOwner(options.ownerId(request));
+      response.json(jobs.map(publicManifest));
+    }),
+  );
+
+  router.get(
+    "/:analysisId/status",
+    asyncHandler(async (request, response) => {
+      const manifest = await store.requireOwned(
+        firstParam(request.params.analysisId),
+        options.ownerId(request),
+      );
+      response.status(manifest.status === "processing" ? 202 : 200).json(
+        publicManifest(manifest),
+      );
+    }),
+  );
+
   router.post(
     "/analyze",
     analysisLimit,
@@ -87,35 +124,24 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
           code: "photo_required",
         });
 
-      const existing = ephemeral
-        ? null
-        : await store.findByIdempotencyKey(ownerId, idempotencyKey);
-      if (existing)
+      const existing = await store.findByIdempotencyKey(ownerId, idempotencyKey);
+      if (existing) {
+        if (existing.status === "processing") launch(existing);
         return response.status(existing.status === "processing" ? 202 : 200).json(
           publicManifest(existing),
         );
-
-      const flightKey = `${ownerId}\0${idempotencyKey}`;
-      const current = inFlight.get(flightKey);
-      if (current) return response.status(202).json({ status: "processing" });
-
-      const operation = analyzeUpload(
-        ownerId,
-        idempotencyKey,
-        request.file.buffer,
-        store,
-        provider,
-        request.body.retainThumbnail !== "false",
-        ephemeral,
-        language,
-      );
-      inFlight.set(flightKey, operation);
-      try {
-        const result = await operation;
-        return response.json(result);
-      } finally {
-        inFlight.delete(flightKey);
       }
+
+      const manifest = await store.create(ownerId, idempotencyKey, request.file.buffer);
+      const queued = await store.update(manifest.analysisId, ownerId, {
+        pendingTask: {
+          kind: "analyze",
+          language,
+          retainThumbnail: request.body.retainThumbnail !== "false" || ephemeral,
+        },
+      });
+      launch(queued);
+      return response.status(202).json(publicManifest(queued));
     }),
   );
 
@@ -150,7 +176,7 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
           error: "A valid Idempotency-Key header is required",
           code: "invalid_idempotency_key",
         });
-      const { answers, priorAnalysis, clarificationRound } = z
+      const { answers } = z
         .strictObject({
           answers: z.record(z.string().max(64), z.string().trim().min(1).max(500)),
           // Accepted only for rolling UI compatibility. The trusted prior result
@@ -164,59 +190,9 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
           error: "Between 1 and 12 clarification answers are required",
           code: "invalid_answers",
         });
-      if (options.ephemeral?.(request)) {
-        if ((clarificationRound ?? 0) >= 2)
-          return response.status(409).json({
-            status: "manual_required",
-            reasonCode: "clarification_limit_reached",
-            manualEntryAvailable: true,
-          });
-        if (!provider.refine)
-          return response.status(501).json({
-            status: "manual_required",
-            reasonCode: "clarification_not_supported",
-            manualEntryAvailable: true,
-          });
-        let trustedPrior;
-        try {
-          trustedPrior = normalizeMealAnalysis(priorAnalysis);
-        } catch {
-          return response.status(400).json({
-            error: "A valid prior analysis is required",
-            code: "invalid_prior_analysis",
-          });
-        }
-        try {
-          const result = await provider.refine(
-            trustedPrior,
-            answers,
-            undefined,
-            requestLanguage(request),
-          );
-          return response.json({
-            analysisId,
-            status: "completed",
-            analysis: result.analysis,
-            result: result.analysis,
-            metadata: {
-              ...result.metadata,
-              clarificationRound: (clarificationRound ?? 0) + 1,
-            },
-            thumbnailUrl: null,
-          });
-        } catch (error) {
-          if (!(error instanceof MealAnalysisProviderError)) throw error;
-          return response.json({
-            analysisId,
-            status: "manual_required",
-            failureCode: error.code,
-            message: error.message,
-            retryable: error.retryable,
-            manualEntryAvailable: true,
-          });
-        }
-      }
       const manifest = await store.requireOwned(analysisId, ownerId);
+      if (manifest.status === "processing")
+        return response.status(202).json(publicManifest(manifest));
       if (Number(manifest.providerMetadata?.clarificationRound ?? 0) >= 2)
         return response.status(409).json({
           status: "manual_required",
@@ -239,41 +215,20 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
           manualEntryAvailable: true,
         });
 
-      const flightKey = `${ownerId}\0clarify\0${idempotencyKey}`;
-      if (inFlight.has(flightKey))
-        return response.status(202).json({ analysisId, status: "processing" });
-      const operation = provider.refine(
-        manifest.result as any,
-        answers,
-        undefined,
-        requestLanguage(request),
-      );
-      inFlight.set(flightKey, operation);
-      try {
-        const result = await operation;
-        const clarificationRound =
-          Number(manifest.providerMetadata?.clarificationRound ?? 0) + 1;
-        const updated = await store.update(analysisId, ownerId, {
-          status: "completed",
-          result: result.analysis,
-          providerMetadata: { ...result.metadata, clarificationRound },
-          failureCode: undefined,
+      const queued = await store.update(analysisId, ownerId, {
+        status: "processing",
+        failureCode: undefined,
+        failureMessage: undefined,
+        retryable: undefined,
+        pendingTask: {
+          kind: "clarify",
+          language: requestLanguage(request),
+          answers,
           refinementIdempotencyHash: refinementHash,
-        });
-        return response.json(publicManifest(updated));
-      } catch (error) {
-        if (!(error instanceof MealAnalysisProviderError)) throw error;
-        return response.json({
-          ...publicManifest(manifest),
-          status: "manual_required",
-          failureCode: error.code,
-          message: error.message,
-          retryable: error.retryable,
-          manualEntryAvailable: true,
-        });
-      } finally {
-        inFlight.delete(flightKey);
-      }
+        },
+      });
+      launch(queued);
+      return response.status(202).json(publicManifest(queued));
     }),
   );
 
@@ -309,59 +264,73 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
   return router;
 }
 
-async function analyzeUpload(
-  ownerId: string,
-  idempotencyKey: string,
-  bytes: Buffer,
+async function runPendingTask(
+  manifest: Awaited<ReturnType<PrivateFoodPhotoStore["requireOwned"]>>,
   store: PrivateFoodPhotoStore,
   provider: MealAnalysisProvider,
-  retainThumbnail: boolean,
-  ephemeral: boolean,
-  language: "en" | "de" | "ru",
-  signal?: AbortSignal,
 ) {
-  const manifest = await store.create(ownerId, idempotencyKey, bytes);
+  const task = manifest.pendingTask;
+  if (!task) return;
   try {
-    const analysisBytes = await store.analysisBytes(manifest.analysisId, ownerId);
-    const result = await provider.analyze(analysisBytes, signal, language);
-    const updated = await store.update(manifest.analysisId, ownerId, {
+    const result = task.kind === "analyze"
+      ? await provider.analyze(
+          await store.analysisBytes(manifest.analysisId, manifest.ownerId),
+          undefined,
+          task.language,
+        )
+      : await provider.refine!(
+          manifest.result as any,
+          task.answers,
+          undefined,
+          task.language,
+        );
+    const clarificationRound = task.kind === "clarify"
+      ? Number(manifest.providerMetadata?.clarificationRound ?? 0) + 1
+      : Number(manifest.providerMetadata?.clarificationRound ?? 0);
+    await store.update(manifest.analysisId, manifest.ownerId, {
       status: "completed",
       result: result.analysis,
-      providerMetadata: result.metadata,
+      providerMetadata: { ...result.metadata, clarificationRound },
       failureCode: undefined,
+      failureMessage: undefined,
+      retryable: undefined,
+      pendingTask: undefined,
+      refinementIdempotencyHash:
+        task.kind === "clarify"
+          ? task.refinementIdempotencyHash
+          : manifest.refinementIdempotencyHash,
     });
-    if (!ephemeral) return publicManifest(updated);
-    const thumbnail = updated.thumbnailFile
-      ? await store.thumbnail(updated.analysisId, ownerId)
-      : null;
-    return {
-      ...publicManifest(updated),
-      thumbnailUrl: thumbnail
-        ? `data:image/jpeg;base64,${thumbnail.toString("base64")}`
-        : null,
-    };
   } catch (error) {
-    if (!(error instanceof MealAnalysisProviderError)) throw error;
-    const updated = await store.update(manifest.analysisId, ownerId, {
+    const providerError = error instanceof MealAnalysisProviderError;
+    await store.update(manifest.analysisId, manifest.ownerId, {
       status: "manual_required",
-      result: undefined,
-      providerMetadata: undefined,
-      failureCode: error.code,
+      failureCode: providerError ? error.code : "internal_error",
+      failureMessage: providerError
+        ? error.message
+        : "Meal analysis could not be completed; retry or enter it manually",
+      retryable: providerError ? error.retryable : true,
+      pendingTask: undefined,
     });
-    return {
-      ...publicManifest(updated),
-      message: error.message,
-      retryable: error.retryable,
-      manualEntryAvailable: true,
-    };
+    console.error(JSON.stringify({
+      event: "nutrition_analysis_provider_failed",
+      analysisId: manifest.analysisId,
+      task: task.kind,
+      failureCode: providerError ? error.code : "internal_error",
+      retryable: providerError ? error.retryable : true,
+      model: manifest.providerMetadata?.model,
+    }));
   } finally {
-    // The bounded analysis derivative is the only "original" sent to AI. It is
-    // removed on success, refusal, timeout and malformed/provider failure.
-    await store.removeAnalysisImage(manifest.analysisId, ownerId).catch(() => undefined);
-    if (ephemeral) {
-      await store.remove(manifest.analysisId, ownerId).catch(() => undefined);
-    } else if (!retainThumbnail)
-      await store.removeThumbnail(manifest.analysisId, ownerId).catch(() => undefined);
+    if (task.kind === "analyze") {
+      // The bounded derivative is deleted after the provider finishes. The
+      // private thumbnail and manifest remain available for asynchronous review.
+      await store.removeAnalysisImage(manifest.analysisId, manifest.ownerId).catch(
+        () => undefined,
+      );
+      if (!task.retainThumbnail)
+        await store.removeThumbnail(manifest.analysisId, manifest.ownerId).catch(
+          () => undefined,
+        );
+    }
   }
 }
 
@@ -371,13 +340,22 @@ function publicManifest(manifest: {
   result?: unknown;
   providerMetadata?: Record<string, unknown>;
   failureCode?: string;
+  failureMessage?: string;
+  retryable?: boolean;
+  createdAt?: string;
+  pendingTask?: unknown;
+  finalizedAt?: string;
 }) {
   return {
     analysisId: manifest.analysisId,
     status: manifest.status,
+    createdAt: manifest.createdAt,
     analysis: manifest.result,
     result: manifest.result,
     failureCode: manifest.failureCode,
+    message: manifest.failureMessage,
+    retryable: manifest.retryable,
+    manualEntryAvailable: manifest.status === "manual_required",
     metadata: manifest.providerMetadata,
     thumbnailUrl:
       "thumbnailFile" in manifest && manifest.thumbnailFile === null
