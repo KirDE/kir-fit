@@ -147,7 +147,9 @@ async function analysisRequest(
     (error as Error & { status?: number }).status = response.status;
     throw error;
   }
-  return (await response.json()) as MealAnalysis;
+  const result = await response.json();
+  if (result.status === "manual_required") throw new Error("manual-required");
+  return result as MealAnalysis;
 }
 
 export const analyzeMeal = (file: File) => {
@@ -169,4 +171,5 @@ export const clarifyMeal = (
   analysisRequest(
     `/nutrition/photos/analyze/${analysis.id}/clarify`,
     JSON.stringify({ answers, priorAnalysis: analysis }),
+    crypto.randomUUID(),
   );
