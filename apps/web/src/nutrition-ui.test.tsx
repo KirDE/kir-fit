@@ -95,7 +95,7 @@ describe("nutrition mobile workflow", () => {
     expect(screen.getByText("No food recorded for this day.")).toBeTruthy();
   });
 
-  it("opens completed background photo jobs and queues clarification without blocking", async () => {
+  it("shows a saved estimate after provider failure and queues clarification without blocking", async () => {
     let clarificationQueued = false;
     const analysis = {
       summary: "Breaded fish and vegetables",
@@ -128,9 +128,11 @@ describe("nutrition mobile workflow", () => {
       if (url.endsWith("/api/nutrition/photos")) {
         return new Response(JSON.stringify([{
           analysisId: "analysis-async-1",
-          status: clarificationQueued ? "processing" : "completed",
+          status: clarificationQueued ? "processing" : "manual_required",
           createdAt: new Date().toISOString(),
           result: analysis,
+          failureCode: clarificationQueued ? undefined : "malformed_response",
+          message: clarificationQueued ? undefined : "The updated estimate was incomplete",
           thumbnailUrl: null,
           metadata: { clarificationRound: 0 },
         }]), { status: clarificationQueued ? 202 : 200, headers: { "Content-Type": "application/json" } });
@@ -142,7 +144,11 @@ describe("nutrition mobile workflow", () => {
     const open = await screen.findByRole("button", {
       name: /breaded fish and vegetables.*answer questions/i,
     });
+    expect(open.textContent).toMatch(/360 kcal.*30 g protein/i);
     fireEvent.click(open);
+    await screen.findByText(/estimated from a photo/i);
+    expect(screen.queryByText(/photo analysis is unavailable/i)).toBeNull();
+    expect(screen.getByRole("button", { name: /review estimate/i })).toBeTruthy();
     await screen.findByText("What is inside the breading?");
     fireEvent.click(screen.getByLabelText("White fish"));
     fireEvent.click(screen.getByRole("button", { name: /update estimate/i }));
@@ -176,7 +182,7 @@ describe("nutrition mobile workflow", () => {
               options: ["Yes", "No"],
             }],
           },
-          metadata: { clarificationRound: 2 },
+          metadata: { clarificationRound: 1 },
           thumbnailUrl: null,
         }]), { status: 200, headers: { "Content-Type": "application/json" } });
       }

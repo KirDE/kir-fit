@@ -210,7 +210,10 @@ describe("private nutrition photo routes", () => {
       "x-test-owner": "owner-a",
     });
     expect(refinedBody).toMatchObject({
-      result: { summary: "Salad with oil dressing" },
+      result: {
+        summary: "Salad with oil dressing",
+        clarificationQuestions: [],
+      },
     });
     expect((await clarify()).status).toBe(200);
     expect(refine).toHaveBeenCalledTimes(1);

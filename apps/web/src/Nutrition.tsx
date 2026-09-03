@@ -451,13 +451,14 @@ function PhotoAnalysisCard({ job, onOpen, onDelete }: {
   const normalized = job.result || job.analysis
     ? normalizeMealAnalysis(job)
     : undefined;
+  const totals = normalized ? sumItems(normalized.items) : undefined;
   const label = job.status === "processing"
     ? nt("processing")
-    : job.status === "manual_required"
-      ? nt("analysisFailedShort")
-      : normalized?.questions.length && normalized.clarificationRound < 2
+    : normalized?.questions.length && normalized.clarificationRound < 1
         ? nt("answerQuestions")
-        : nt("reviewEstimate");
+        : normalized
+          ? nt("reviewEstimate")
+          : nt("analysisFailedShort");
   return <div className={`nutrition-entry nutrition-analysis-card ${job.status}`}>
     <button className="nutrition-analysis-open" onClick={onOpen}>
       {job.thumbnailUrl
@@ -466,6 +467,7 @@ function PhotoAnalysisCard({ job, onOpen, onDelete }: {
       <span>
         <b>{normalized?.title || nt("processing")}</b>
         <small>{label}</small>
+        {totals && <small>{Math.round(totals.calories)} kcal · {Math.round(totals.proteinGrams)} {nt("gramShort")} {nt("protein").toLocaleLowerCase()}</small>}
       </span>
       {job.status === "processing" ? <RefreshCw className="nutrition-spin" /> : <ChevronRight />}
     </button>
@@ -535,7 +537,7 @@ function MealEditor({ value, job, date, onClose, onQueued, onSaved, onDelete }: 
     ? "review"
     : job?.status === "processing"
       ? "loading"
-      : initialAnalysis?.questions.length && initialAnalysis.clarificationRound < 2
+      : initialAnalysis?.questions.length && initialAnalysis.clarificationRound < 1
         ? "questions"
         : job
           ? "review"
@@ -551,7 +553,7 @@ function MealEditor({ value, job, date, onClose, onQueued, onSaved, onDelete }: 
   const [mealType, setMealType] = useState<NutritionEntry["mealType"]>(value?.mealType || "snack");
   const [consumedPercent, setConsumedPercent] = useState(value?.consumedPercent ?? 100);
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [error, setError] = useState(job?.status === "manual_required" ? nt("analysisFailed") : "");
+  const [error, setError] = useState(job?.status === "manual_required" && !initialAnalysis ? nt("analysisFailed") : "");
   const [saving, setSaving] = useState(false);
   const galleryRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -584,12 +586,12 @@ function MealEditor({ value, job, date, onClose, onQueued, onSaved, onDelete }: 
         <p>{nt("privatePhoto")}</p>
       </div>}
       {stage === "loading" && <div className="nutrition-analyzing" aria-live="polite"><i /><p>{nt("processing")}</p><small>{nt("queuedHint")}</small></div>}
-      {stage === "questions" && analysis && <Clarifications analysis={analysis} answers={answers} setAnswers={setAnswers} onManual={() => setStage("review")} onContinue={async () => {
-        if (analysis.clarificationRound >= 2) { setStage("review"); return; }
+      {stage === "questions" && analysis && <><div className="nutrition-estimate"><b>{nt("estimated")}</b><MacroGrid nutrients={sumItems(analysis.items)} /></div><Clarifications analysis={analysis} answers={answers} setAnswers={setAnswers} onManual={() => setStage("review")} onContinue={async () => {
+        if (analysis.clarificationRound >= 1) { setStage("review"); return; }
         setError("");
         try { await clarifyMeal(analysis, answers); onQueued(); }
         catch { setError(nt("analysisFailed")); }
-      }} />}
+      }} /></>}
       {stage === "review" && <div className="nutrition-review">
         {analysis && <div className="nutrition-estimate"><b>{nt("estimated")}</b>{analysis.uncertainty && <p><strong>{nt("uncertainty")}:</strong> {analysis.uncertainty}</p>}{analysis.assumptions.length > 0 && <details><summary>{nt("assumptions")}</summary><ul>{analysis.assumptions.map((item, index) => <li key={index}>{item}</li>)}</ul></details>}</div>}
         <label>{nt("mealName")}<input value={title} maxLength={120} onChange={(event) => setTitle(event.target.value)} /></label>
@@ -612,7 +614,7 @@ function MealEditor({ value, job, date, onClose, onQueued, onSaved, onDelete }: 
 }
 
 function Clarifications({ analysis, answers, setAnswers, onContinue, onManual }: { analysis: MealAnalysis; answers: Record<string, string>; setAnswers: (answers: Record<string, string>) => void; onContinue: () => void; onManual: () => void }) {
-  return <div className="nutrition-questions"><p>{nt("questions")}</p>{analysis.questions.map(question => <fieldset key={question.id}><legend>{question.text}</legend>{question.choices.map(choice => <label key={choice}><input type="radio" name={question.id} checked={answers[question.id] === choice} onChange={() => setAnswers({ ...answers, [question.id]: choice })} />{choice}</label>)}{question.allowFreeText !== false && <label><span>{nt("other")}</span><input placeholder={nt("answer")} onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })} /></label>}</fieldset>)}<button className="primary" disabled={analysis.questions.some(question => !answers[question.id]?.trim())} onClick={onContinue}>{nt("continue")}</button><button className="nutrition-manual-link" onClick={onManual}>{nt("editDirectly")}</button></div>;
+  return <div className="nutrition-questions"><p>{nt("questions")}</p>{analysis.questions.map(question => <fieldset key={question.id}><legend>{question.text}</legend>{question.choices.map(choice => <label key={choice}><input type="radio" name={question.id} checked={answers[question.id] === choice} onChange={() => setAnswers({ ...answers, [question.id]: choice })} />{choice}</label>)}{question.allowFreeText !== false && <label><span>{nt("other")}</span><input placeholder={nt("answer")} onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })} /></label>}</fieldset>)}<button className="primary" disabled={analysis.questions.some(question => !answers[question.id]?.trim())} onClick={onContinue}>{nt("continue")}</button><button className="nutrition-manual-link" onClick={onManual}>{nt("reviewEstimate")}</button></div>;
 }
 
 function NutritionItemEditor({ item, onChange, onRemove }: { item: NutritionItem; onChange: (item: NutritionItem) => void; onRemove?: () => void }) {

@@ -401,7 +401,7 @@ export class OpenAiMealAnalysisProvider implements MealAnalysisProvider {
       [
         {
           type: "input_text",
-          text: `${localizedPrompt(language)}\nRevise the prior analysis using only the user's answers below. Remove a clarification question only when its uncertainty is resolved. Preserve ranges for remaining uncertainty.\nPrior analysis: ${JSON.stringify(prior)}\nUser answers: ${JSON.stringify(answers)}`,
+          text: `${localizedPrompt(language)}\nRevise the prior analysis using only the user's answers below. This is the only clarification round: set clarificationQuestions to an empty array after updating the estimate. Preserve ranges and assumptions for any uncertainty that remains.\nPrior analysis: ${JSON.stringify(prior)}\nUser answers: ${JSON.stringify(answers)}`,
         },
       ],
       signal,
