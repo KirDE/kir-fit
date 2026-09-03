@@ -443,7 +443,7 @@ function PhotoAnalysisCard({ job, onOpen, onDelete }: {
     ? nt("processing")
     : job.status === "manual_required"
       ? nt("analysisFailedShort")
-      : normalized?.questions.length
+      : normalized?.questions.length && normalized.clarificationRound < 2
         ? nt("answerQuestions")
         : nt("reviewEstimate");
   return <div className={`nutrition-entry nutrition-analysis-card ${job.status}`}>
