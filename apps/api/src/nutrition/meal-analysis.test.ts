@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { mealAnalysisV1Fixtures } from "./fixtures/meal-analysis-v1.js";
-import { normalizeMealAnalysis, OpenAiMealAnalysisProvider } from "./meal-analysis.js";
+import { conciseMealTitle, normalizeMealAnalysis, OpenAiMealAnalysisProvider } from "./meal-analysis.js";
 
 describe("meal analysis schema v1 fixtures", () => {
   it.each(mealAnalysisV1Fixtures.map((fixture, index) => [index, fixture]))(
@@ -40,12 +40,20 @@ describe("meal analysis schema v1 fixtures", () => {
       expect.arrayContaining([expect.objectContaining({ id: "material_assumption_2" })]),
     );
   });
+
+  it("uses food names instead of a verbose photo-description title", () => {
+    expect(conciseMealTitle(
+      "На фото изображен пакетик порошкового крем-супа со вкусом спаржи от Knorr, приготовленный только с водой",
+      ["Крем-суп из спаржи Knorr"],
+    )).toBe("Крем-суп из спаржи Knorr");
+  });
 });
 
 describe("OpenAI meal analysis adapter", () => {
   it("uses strict structured output and returns bounded metadata", async () => {
     const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const request = JSON.parse(String(init?.body));
+      expect(request.input[0].content[0].text).toContain("short display title");
       expect(request.text.format.strict).toBe(true);
       expect(request.text.format.schema.additionalProperties).toBe(false);
       expect(request.max_output_tokens).toBe(2500);

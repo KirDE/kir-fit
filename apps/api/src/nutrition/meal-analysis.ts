@@ -93,6 +93,27 @@ export type MealAnalysisResponse = {
   metadata: MealAnalysisMetadata;
 };
 
+export const MAX_MEAL_TITLE_LENGTH = 72;
+
+const photoDescriptionPrefix = /^(?:на (?:этом )?(?:фото|фотографии|изображении)\s+(?:изображ(?:е|ё)н(?:а|о|ы)?|вид(?:ен|на|но|ны))|(?:this |the )?(?:photo|image)\s+(?:shows|depicts)|(?:auf (?:dem|diesem) foto (?:ist|sind)|das foto zeigt))(?=[\s,:-]|$)[\s,:-]*/iu;
+
+export function conciseMealTitle(summary: string, foodNames: string[] = []) {
+  const normalized = summary.replace(/\s+/g, " ").trim();
+  const isPhotoDescription = photoDescriptionPrefix.test(normalized);
+  const foodTitle = foodNames
+    .map((name) => name.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(" + ");
+  const candidate = isPhotoDescription && foodTitle
+    ? foodTitle
+    : normalized.replace(photoDescriptionPrefix, "").split(/[,;]|\s+[—–]\s+/u, 1)[0].trim();
+  const bounded = candidate.length <= MAX_MEAL_TITLE_LENGTH
+    ? candidate
+    : `${candidate.slice(0, MAX_MEAL_TITLE_LENGTH - 1).replace(/\s+\S*$/u, "").trim()}…`;
+  return bounded || "Meal";
+}
+
 export class MealAnalysisProviderError extends Error {
   constructor(
     public readonly code:
@@ -130,6 +151,7 @@ export interface MealAnalysisProvider {
  */
 export function normalizeMealAnalysis(input: unknown): MealAnalysis {
   const parsed = mealAnalysisSchema.parse(input);
+  parsed.summary = conciseMealTitle(parsed.summary, parsed.foods.map((food) => food.name));
   const questions = [...parsed.clarificationQuestions];
   const knownQuestionIds = new Set(questions.map((question) => question.id));
   const hasRequiredModelQuestion = questions.some((question) => question.required);
@@ -329,6 +351,10 @@ function rangeSchema(estimate: string, min: string, max: string) {
 }
 
 const systemPrompt = `You estimate nutrition from one meal photo. Output estimates, never facts.
+The summary is a short display title for the meal: 2-8 words and at most 60 characters. Name only
+the dish or product, including the brand when visible. Never start it with "the photo shows", "on
+the photo", or an equivalent phrase. Do not put packaging, preparation, quantities, ingredients,
+nutrition values, assumptions, or full sentences in the summary; put those details in other fields.
 List each visible component and give ranges for portion and every nutrient. Do not invent invisible
 ingredients. Explicitly surface unknown oil, sauce, sugar, cream, cheese, cooking method and portion
 scale. Any uncertainty likely to change calories or protein by 15% or more is material and must have
