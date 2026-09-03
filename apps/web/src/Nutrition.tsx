@@ -257,6 +257,7 @@ export const normalizeMealAnalysis = (raw: MealAnalysis | any): MealAnalysis => 
     clarificationRound:
       value.clarificationRound || raw.metadata?.clarificationRound || 0,
     thumbnailUrl: raw.thumbnailUrl || value.thumbnailUrl,
+    providerResult: value,
   };
 };
 
@@ -462,7 +463,7 @@ function MealEditor({ value, date, onClose, onSaved, onDelete }: { value?: Nutri
       {stage === "questions" && analysis && <Clarifications analysis={analysis} answers={answers} setAnswers={setAnswers} onManual={() => setStage("review")} onContinue={async () => {
         if (analysis.clarificationRound >= 2) { setStage("review"); return; }
         setStage("loading"); setError("");
-        try { const next = normalizeMealAnalysis(await clarifyMeal(analysis, answers)); setAnalysis(next); setTitle(next.title); setItems(next.items); setAnswers({}); setStage(next.questions.length && next.clarificationRound < 2 ? "questions" : "review"); }
+        try { const next = normalizeMealAnalysis(await clarifyMeal(analysis, answers)); next.thumbnailUrl ||= analysis.thumbnailUrl; setAnalysis(next); setTitle(next.title); setItems(next.items); setAnswers({}); setStage(next.questions.length && next.clarificationRound < 2 ? "questions" : "review"); }
         catch { setError(nt("analysisFailed")); setStage("review"); }
       }} />}
       {stage === "review" && <div className="nutrition-review">

@@ -173,6 +173,6 @@ export const clarifyMeal = (
 ) =>
   analysisRequest(
     `/nutrition/photos/analyze/${analysis.id}/clarify`,
-    JSON.stringify({ answers, priorAnalysis: analysis }),
+    JSON.stringify({ answers, priorAnalysis: analysis.providerResult || analysis }),
     crypto.randomUUID(),
   );

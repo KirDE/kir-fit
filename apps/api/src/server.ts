@@ -71,6 +71,27 @@ const auth = asyncRoute(async (req: any, res: any, next: any) => {
     return res.status(401).json({ error: "Invalid session" });
   }
 });
+const nutritionPhotoAuth = asyncRoute(async (req: any, res: any, next: any) => {
+  const bearer = req.headers.authorization?.replace(/^Bearer /, "");
+  if (bearer) {
+    try {
+      req.auth = jwt.verify(bearer, secret);
+      return next();
+    } catch {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+  }
+  const device = String(req.headers["x-kirfit-device"] || "");
+  if (!/^[0-9a-f-]{20,80}$/i.test(device))
+    return res.status(401).json({ error: "Authentication required" });
+  req.auth = {
+    sub: `guest-${createHash("sha256")
+      .update(`${req.ip}\0${device}`)
+      .digest("hex")}`,
+    guest: true,
+  };
+  return next();
+});
 const userId = (req: any) => req.auth.sub as string;
 
 const rpName = "Kir Fit";
@@ -1360,8 +1381,12 @@ app.get(
 
 app.use(
   "/api/nutrition/photos",
-  auth,
-  createNutritionPhotoRouter({ ownerId: userId, store: nutritionPhotoStore }),
+  nutritionPhotoAuth,
+  createNutritionPhotoRouter({
+    ownerId: userId,
+    store: nutritionPhotoStore,
+    ephemeral: (request: any) => request.auth?.guest === true,
+  }),
 );
 
 const uploads = path.resolve(process.env.UPLOAD_DIR || "/app/uploads");

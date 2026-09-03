@@ -25,6 +25,7 @@ async function testServer(provider: MealAnalysisProvider) {
     "/api/nutrition/photos",
     createNutritionPhotoRouter({
       ownerId: (request) => String(request.header("x-test-owner") || "anonymous"),
+      ephemeral: (request) => request.header("x-ephemeral") === "1",
       store: new PrivateFoodPhotoStore(root),
       provider,
     }),
@@ -181,6 +182,83 @@ describe("private nutrition photo routes", () => {
       result: { summary: "Salad with oil dressing" },
     });
     expect((await clarify()).status).toBe(200);
+    expect(refine).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps guest analysis stateless and supports a validated clarification", async () => {
+    const refined = {
+      ...structuredClone(mealAnalysisV1Fixtures[0]),
+      summary: "Guest clarified salad",
+    };
+    const refine = vi.fn(async () => ({
+      analysis: refined,
+      metadata: {
+        provider: "fixture",
+        model: "fixture-v1",
+        schemaVersion: "meal-photo-v1",
+        latencyMs: 1,
+        inputTokens: null,
+        outputTokens: null,
+        estimatedCostUsd: null,
+      },
+    }));
+    const url = await testServer({
+      analyze: async () => ({
+        analysis: mealAnalysisV1Fixtures[0],
+        metadata: {
+          provider: "fixture",
+          model: "fixture-v1",
+          schemaVersion: "meal-photo-v1",
+          latencyMs: 1,
+          inputTokens: null,
+          outputTokens: null,
+          estimatedCostUsd: null,
+        },
+      }),
+      refine,
+    });
+    const uploaded = await fetch(`${url}/api/nutrition/photos/analyze`, {
+      method: "POST",
+      headers: {
+        "x-test-owner": "guest-owner",
+        "x-ephemeral": "1",
+        "Idempotency-Key": "guest-request-1001",
+      },
+      body: await photoForm(),
+    });
+    expect(uploaded.status).toBe(200);
+    const body: any = await uploaded.json();
+    expect(body.thumbnailUrl).toMatch(/^data:image\/jpeg;base64,/);
+    expect(
+      (
+        await fetch(`${url}/api/nutrition/photos/${body.analysisId}/thumbnail`, {
+          headers: { "x-test-owner": "guest-owner" },
+        })
+      ).status,
+    ).toBe(404);
+
+    const clarified = await fetch(
+      `${url}/api/nutrition/photos/analyze/${body.analysisId}/clarify`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-test-owner": "guest-owner",
+          "x-ephemeral": "1",
+          "Idempotency-Key": "guest-clarify-1001",
+        },
+        body: JSON.stringify({
+          answers: { sauce: "oil and vinegar" },
+          priorAnalysis: mealAnalysisV1Fixtures[0],
+        }),
+      },
+    );
+    expect(clarified.status).toBe(200);
+    expect(await clarified.json()).toMatchObject({
+      status: "completed",
+      analysis: { summary: "Guest clarified salad" },
+      metadata: { clarificationRound: 1 },
+    });
     expect(refine).toHaveBeenCalledTimes(1);
   });
 });

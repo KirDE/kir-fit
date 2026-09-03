@@ -53,4 +53,5 @@ export type MealAnalysis = {
   questions: ClarificationQuestion[];
   clarificationRound: number;
   thumbnailUrl?: string;
+  providerResult?: unknown;
 };
