@@ -19,7 +19,20 @@ import {
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
 } from "@simplewebauthn/server";
-import { nextWorkoutDay, shouldSuggestIncrease, volume } from "./domain.js";
+import {
+  calculateProteinTarget,
+  emptyNutrients,
+  localDateKey,
+  localDateToUtc,
+  nextLocalDate,
+  nextWorkoutDay,
+  scaleNutrients,
+  shouldSuggestIncrease,
+  sumNutrients,
+  volume,
+  type Nutrients,
+  type ProteinTargetMode,
+} from "./domain.js";
 
 const prisma = new PrismaClient();
 const app = express();
@@ -40,7 +53,7 @@ app.use(
   cors({ origin: process.env.ORIGIN?.split(",") || false, credentials: true }),
 );
 app.use(express.json({ limit: "1mb" }));
-app.use((pinoHttp as any)());
+app.use((pinoHttp as any)({ enabled: process.env.NODE_ENV !== "test" }));
 const asyncRoute =
   (fn: (req: any, res: any, next: any) => any) =>
   (req: any, res: any, next: any) =>
@@ -67,6 +80,53 @@ const rpID = process.env.RP_ID || new URL(expectedOrigins[0]).hostname;
 const passkeyChallengeLifetimeMs = 5 * 60_000;
 
 const num = (v: any) => Number(v);
+const decimal = (value: number) => new Prisma.Decimal(value);
+const nutritionSettingsSchema = z.object({
+  heightCm: z.number().int().min(100, "height_cm_too_low").max(250, "height_cm_too_high").nullable().optional(),
+  goalWeightKg: z.number().min(30, "goal_weight_too_low").max(500, "goal_weight_too_high").nullable().optional(),
+  proteinTargetMode: z.enum(["automatic", "manual"]).optional(),
+  manualProteinTargetGrams: z.number().int().min(20, "protein_target_too_low").max(400, "protein_target_too_high").nullable().optional(),
+}).strict();
+const nutrientSchema = z.object({
+  calories: z.number().nonnegative().max(100_000),
+  proteinGrams: z.number().nonnegative().max(10_000),
+  fatGrams: z.number().nonnegative().max(10_000),
+  carbsGrams: z.number().nonnegative().max(10_000),
+  fiberGrams: z.number().nonnegative().max(10_000),
+}).strict();
+const nutritionItemSchema = nutrientSchema.extend({
+  name: z.string().trim().min(1).max(120),
+  amountGrams: z.number().nonnegative().max(100_000).nullable().optional(),
+});
+const entryFieldsSchema = z.object({
+  occurredAt: z.string().datetime({ offset: true }),
+  mealType: z.enum(["breakfast", "lunch", "dinner", "snack", "other"]).nullable().optional(),
+  title: z.string().trim().max(160).nullable().optional(),
+  consumedPercent: z.number().min(0).max(100),
+  items: z.array(nutritionItemSchema).min(1).max(50),
+}).strict();
+const localDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine((value) => {
+    const [year, month, day] = value.split("-").map(Number);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    return (
+      parsed.getUTCFullYear() === year &&
+      parsed.getUTCMonth() === month - 1 &&
+      parsed.getUTCDate() === day
+    );
+  }, "invalid_local_date");
+
+function validTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value }).format();
+    return true;
+  } catch {
+    return false;
+  }
+}
+const timeZoneSchema = z.string().min(1).max(100).refine(validTimeZone, "invalid_timezone");
 
 app.get("/api/health", (_req, res) =>
   res.json({ ok: true, version: process.env.APP_VERSION || "dev" }),
@@ -305,14 +365,32 @@ app.patch(
   "/api/settings/profile",
   auth,
   asyncRoute(async (req, res) => {
-    const { displayName } = z
-      .object({ displayName: z.string().trim().min(1).max(80) })
+    const body = z
+      .object({ displayName: z.string().trim().min(1).max(80).optional() })
+      .extend(nutritionSettingsSchema.shape)
+      .strict()
+      .refine((value) => Object.keys(value).length > 0, "empty_profile_patch")
       .parse(req.body);
+    const current = await prisma.user.findUniqueOrThrow({
+      where: { id: userId(req) },
+    });
+    validateEffectiveNutritionSettings(current, body);
     const user = await prisma.user.update({
       where: { id: userId(req) },
-      data: { displayName },
+      data: {
+        ...body,
+        goalWeightKg:
+          body.goalWeightKg === undefined
+            ? undefined
+            : body.goalWeightKg === null
+              ? null
+              : decimal(body.goalWeightKg),
+      },
     });
-    res.json({ displayName: user.displayName });
+    res.json({
+      displayName: user.displayName,
+      ...(await nutritionProfileResponse(userId(req), user)),
+    });
   }),
 );
 
@@ -324,15 +402,66 @@ app.get(
       where: { id: userId(req) },
       select: {
         displayName: true,
+        heightCm: true,
+        startingWeightKg: true,
+        goalWeightKg: true,
+        proteinTargetMode: true,
+        manualProteinTargetGrams: true,
         googleSub: true,
         _count: { select: { authenticators: true } },
       },
     });
     res.json({
       displayName: user.displayName,
+      ...(await nutritionProfileResponse(userId(req), user)),
       googleLinked: Boolean(user.googleSub),
       hasPasskey: user._count.authenticators > 0,
     });
+  }),
+);
+
+app.get(
+  "/api/settings/nutrition",
+  auth,
+  asyncRoute(async (req, res) => {
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { id: userId(req) },
+      select: {
+        heightCm: true,
+        startingWeightKg: true,
+        goalWeightKg: true,
+        proteinTargetMode: true,
+        manualProteinTargetGrams: true,
+      },
+    });
+    res.json(await nutritionProfileResponse(userId(req), user));
+  }),
+);
+
+app.patch(
+  "/api/settings/nutrition",
+  auth,
+  asyncRoute(async (req, res) => {
+    const body = nutritionSettingsSchema
+      .refine((value) => Object.keys(value).length > 0, "empty_nutrition_patch")
+      .parse(req.body);
+    const current = await prisma.user.findUniqueOrThrow({
+      where: { id: userId(req) },
+    });
+    validateEffectiveNutritionSettings(current, body);
+    const user = await prisma.user.update({
+      where: { id: userId(req) },
+      data: {
+        ...body,
+        goalWeightKg:
+          body.goalWeightKg === undefined
+            ? undefined
+            : body.goalWeightKg === null
+              ? null
+              : decimal(body.goalWeightKg),
+      },
+    });
+    res.json(await nutritionProfileResponse(userId(req), user));
   }),
 );
 
@@ -955,6 +1084,196 @@ app.post(
   }),
 );
 
+app.post(
+  "/api/nutrition/entries",
+  auth,
+  asyncRoute(async (req, res) => {
+    const body = entryFieldsSchema.parse(req.body);
+    const occurredAt = new Date(body.occurredAt);
+    validateNutritionDate(occurredAt);
+    const full = sumNutrients(body.items);
+    const scaled = scaleNutrients(full, body.consumedPercent);
+    const entry = await prisma.nutritionEntry.create({
+      data: {
+        userId: userId(req),
+        occurredAt,
+        mealType: body.mealType,
+        title: body.title,
+        consumedPercent: decimal(body.consumedPercent),
+        ...nutrientDatabaseFields(full, "full"),
+        ...nutrientDatabaseFields(scaled),
+        items: {
+          create: body.items.map((item, index) => ({
+            name: item.name,
+            amountGrams:
+              item.amountGrams === undefined || item.amountGrams === null
+                ? null
+                : decimal(item.amountGrams),
+            ...nutrientDatabaseFields(item),
+            sortOrder: index,
+          })),
+        },
+      },
+      include: nutritionEntryInclude,
+    });
+    res.status(201).json(serializeNutritionEntry(entry));
+  }),
+);
+
+app.get(
+  "/api/nutrition/entries/:id",
+  auth,
+  asyncRoute(async (req, res) => {
+    const entry = await prisma.nutritionEntry.findFirstOrThrow({
+      where: { id: req.params.id, userId: userId(req) },
+      include: nutritionEntryInclude,
+    });
+    res.json(serializeNutritionEntry(entry));
+  }),
+);
+
+app.patch(
+  "/api/nutrition/entries/:id",
+  auth,
+  asyncRoute(async (req, res) => {
+    const body = entryFieldsSchema.partial().strict()
+      .refine((value) => Object.keys(value).length > 0, "empty_entry_patch")
+      .parse(req.body);
+    const existing = await prisma.nutritionEntry.findFirstOrThrow({
+      where: { id: req.params.id, userId: userId(req) },
+      include: { items: true },
+    });
+    const occurredAt = body.occurredAt
+      ? new Date(body.occurredAt)
+      : existing.occurredAt;
+    validateNutritionDate(occurredAt);
+    const items = body.items ?? existing.items.map(serializeNutritionItem);
+    const full = sumNutrients(items);
+    const consumedPercent = body.consumedPercent ?? num(existing.consumedPercent);
+    const scaled = scaleNutrients(full, consumedPercent);
+    const entry = await prisma.$transaction(async (tx) => {
+      if (body.items) {
+        await tx.nutritionItem.deleteMany({ where: { entryId: existing.id } });
+      }
+      return tx.nutritionEntry.update({
+        where: { id: existing.id, userId: userId(req) },
+        data: {
+          occurredAt,
+          mealType: body.mealType,
+          title: body.title,
+          consumedPercent: decimal(consumedPercent),
+          ...nutrientDatabaseFields(full, "full"),
+          ...nutrientDatabaseFields(scaled),
+          items: body.items
+            ? {
+                create: body.items.map((item, index) => ({
+                  name: item.name,
+                  amountGrams:
+                    item.amountGrams === undefined || item.amountGrams === null
+                      ? null
+                      : decimal(item.amountGrams),
+                  ...nutrientDatabaseFields(item),
+                  sortOrder: index,
+                })),
+              }
+            : undefined,
+        },
+        include: nutritionEntryInclude,
+      });
+    });
+    res.json(serializeNutritionEntry(entry));
+  }),
+);
+
+app.delete(
+  "/api/nutrition/entries/:id",
+  auth,
+  asyncRoute(async (req, res) => {
+    await prisma.nutritionEntry.delete({
+      where: { id: req.params.id, userId: userId(req) },
+    });
+    res.status(204).end();
+  }),
+);
+
+app.get(
+  "/api/nutrition/entries",
+  auth,
+  asyncRoute(async (req, res) => {
+    const query = z.object({
+      from: localDateSchema,
+      to: localDateSchema,
+      timezone: timeZoneSchema,
+    }).strict().parse(req.query);
+    if (query.from > query.to)
+      throw Object.assign(new Error("invalid_date_range"), { status: 400 });
+    const start = localDateToUtc(query.from, query.timezone);
+    const end = localDateToUtc(nextLocalDate(query.to), query.timezone);
+    if (end.getTime() - start.getTime() > 367 * 24 * 60 * 60_000)
+      throw Object.assign(new Error("date_range_too_large"), { status: 400 });
+    const entries = await prisma.nutritionEntry.findMany({
+      where: {
+        userId: userId(req),
+        occurredAt: { gte: start, lt: end },
+      },
+      orderBy: { occurredAt: "desc" },
+      include: nutritionEntryInclude,
+    });
+    const days = new Map<string, any[]>();
+    for (const entry of entries) {
+      const key = localDateKey(entry.occurredAt, query.timezone);
+      days.set(key, [...(days.get(key) ?? []), serializeNutritionEntry(entry)]);
+    }
+    res.json({
+      from: query.from,
+      to: query.to,
+      timezone: query.timezone,
+      days: [...days.entries()].map(([date, dayEntries]) => ({
+        date,
+        entries: dayEntries,
+        totals: sumNutrients(dayEntries),
+      })),
+    });
+  }),
+);
+
+app.get(
+  "/api/nutrition/days/:date",
+  auth,
+  asyncRoute(async (req, res) => {
+    const date = localDateSchema.parse(req.params.date);
+    const { timezone } = z.object({ timezone: timeZoneSchema }).strict().parse(req.query);
+    const start = localDateToUtc(date, timezone);
+    const end = localDateToUtc(nextLocalDate(date), timezone);
+    const [entries, profile] = await Promise.all([
+      prisma.nutritionEntry.findMany({
+        where: { userId: userId(req), occurredAt: { gte: start, lt: end } },
+        orderBy: { occurredAt: "asc" },
+        include: nutritionEntryInclude,
+      }),
+      nutritionProfileResponse(userId(req)),
+    ]);
+    const serialized = entries.map(serializeNutritionEntry);
+    const totals = sumNutrients(serialized);
+    const target = profile.calculation.targetGrams;
+    const proteinPercent = target
+      ? Math.round((totals.proteinGrams / target) * 1000) / 10
+      : null;
+    res.json({
+      date,
+      timezone,
+      entries: serialized,
+      totals,
+      proteinTargetGrams: target,
+      proteinPercent,
+      proteinRemainingGrams:
+        target === null ? null : Math.max(0, Math.round((target - totals.proteinGrams) * 100) / 100),
+      proteinExcessGrams:
+        target === null ? null : Math.max(0, Math.round((totals.proteinGrams - target) * 100) / 100),
+    });
+  }),
+);
+
 const uploads = path.resolve(process.env.UPLOAD_DIR || "/app/uploads");
 fs.mkdirSync(uploads, { recursive: true });
 const upload = multer({
@@ -1064,16 +1383,19 @@ app.use((err: any, _req: any, res: any, _next: any) => {
   res.status(500).json({ error: "Unexpected server error" });
 });
 const port = Number(process.env.PORT || 3000);
-const server = app.listen(port, () =>
-  console.log(`kir-fit listening on ${port}`),
-);
+const server =
+  process.env.NODE_ENV === "test"
+    ? null
+    : app.listen(port, () => console.log(`kir-fit listening on ${port}`));
 const stop = async () => {
-  server.close();
+  server?.close();
   await prisma.$disconnect();
   process.exit(0);
 };
 process.on("SIGTERM", stop);
 process.on("SIGINT", stop);
+
+export { app, prisma };
 
 const sessionInclude = {
   template: true,
@@ -1091,6 +1413,153 @@ const sessionInclude = {
     },
   },
 };
+const nutritionEntryInclude = {
+  items: { orderBy: { sortOrder: "asc" as const } },
+  photo: true,
+  analysis: { include: { clarifications: true } },
+};
+
+function validateEffectiveNutritionSettings(current: any, patch: any) {
+  const mode = patch.proteinTargetMode ?? current.proteinTargetMode;
+  const manual =
+    patch.manualProteinTargetGrams === undefined
+      ? current.manualProteinTargetGrams
+      : patch.manualProteinTargetGrams;
+  if (mode === "manual" && manual === null)
+    throw Object.assign(new Error("manual_protein_target_required"), {
+      status: 400,
+    });
+}
+
+async function nutritionProfileResponse(uid: string, suppliedUser?: any) {
+  const [user, latestWeight] = await Promise.all([
+    suppliedUser
+      ? Promise.resolve(suppliedUser)
+      : prisma.user.findUniqueOrThrow({ where: { id: uid } }),
+    prisma.bodyWeightEntry.findFirst({
+      where: { userId: uid },
+      orderBy: [{ date: "desc" }, { id: "desc" }],
+    }),
+  ]);
+  const proteinTargetMode = user.proteinTargetMode as ProteinTargetMode;
+  const calculation = calculateProteinTarget({
+    heightCm: user.heightCm,
+    currentWeightKg: latestWeight ? num(latestWeight.weight) : null,
+    startingWeightKg:
+      user.startingWeightKg === null ? null : num(user.startingWeightKg),
+    goalWeightKg: user.goalWeightKg === null ? null : num(user.goalWeightKg),
+    mode: proteinTargetMode,
+    manualProteinTargetGrams: user.manualProteinTargetGrams,
+  });
+  return {
+    heightCm: user.heightCm,
+    startingWeightKg:
+      user.startingWeightKg === null ? null : num(user.startingWeightKg),
+    goalWeightKg: user.goalWeightKg === null ? null : num(user.goalWeightKg),
+    proteinTargetMode,
+    manualProteinTargetGrams: user.manualProteinTargetGrams,
+    calculation,
+    disclaimer: {
+      code: "nutrition_estimate_not_medical_advice",
+      clinicianReviewCode: "protein_restriction_or_kidney_disease_review",
+    },
+  };
+}
+
+function validateNutritionDate(date: Date) {
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getUTCFullYear() < 2000 ||
+    date.getUTCFullYear() > 2100
+  )
+    throw Object.assign(new Error("invalid_nutrition_date"), { status: 400 });
+}
+
+type DatabaseNutrients = {
+  calories: Prisma.Decimal;
+  proteinGrams: Prisma.Decimal;
+  fatGrams: Prisma.Decimal;
+  carbsGrams: Prisma.Decimal;
+  fiberGrams: Prisma.Decimal;
+};
+type FullDatabaseNutrients = {
+  fullCalories: Prisma.Decimal;
+  fullProteinGrams: Prisma.Decimal;
+  fullFatGrams: Prisma.Decimal;
+  fullCarbsGrams: Prisma.Decimal;
+  fullFiberGrams: Prisma.Decimal;
+};
+function nutrientDatabaseFields(nutrients: Nutrients): DatabaseNutrients;
+function nutrientDatabaseFields(
+  nutrients: Nutrients,
+  prefix: "full",
+): FullDatabaseNutrients;
+function nutrientDatabaseFields(
+  nutrients: Nutrients,
+  prefix: "" | "full" = "",
+): DatabaseNutrients | FullDatabaseNutrients {
+  const field = (name: string) =>
+    prefix ? `${prefix}${name[0].toUpperCase()}${name.slice(1)}` : name;
+  return {
+    [field("calories")]: decimal(nutrients.calories),
+    [field("proteinGrams")]: decimal(nutrients.proteinGrams),
+    [field("fatGrams")]: decimal(nutrients.fatGrams),
+    [field("carbsGrams")]: decimal(nutrients.carbsGrams),
+    [field("fiberGrams")]: decimal(nutrients.fiberGrams),
+  } as DatabaseNutrients | FullDatabaseNutrients;
+}
+
+function serializeNutritionItem(item: any) {
+  return {
+    ...(item.id ? { id: item.id } : {}),
+    name: item.name,
+    amountGrams:
+      item.amountGrams === undefined || item.amountGrams === null
+        ? null
+        : num(item.amountGrams),
+    calories: num(item.calories),
+    proteinGrams: num(item.proteinGrams),
+    fatGrams: num(item.fatGrams),
+    carbsGrams: num(item.carbsGrams),
+    fiberGrams: num(item.fiberGrams),
+    ...(item.sortOrder === undefined ? {} : { sortOrder: item.sortOrder }),
+  };
+}
+
+function serializeNutritionEntry(entry: any) {
+  return {
+    id: entry.id,
+    occurredAt: entry.occurredAt,
+    mealType: entry.mealType,
+    title: entry.title,
+    consumedPercent: num(entry.consumedPercent),
+    fullCalories: num(entry.fullCalories),
+    fullProteinGrams: num(entry.fullProteinGrams),
+    fullFatGrams: num(entry.fullFatGrams),
+    fullCarbsGrams: num(entry.fullCarbsGrams),
+    fullFiberGrams: num(entry.fullFiberGrams),
+    calories: num(entry.calories),
+    proteinGrams: num(entry.proteinGrams),
+    fatGrams: num(entry.fatGrams),
+    carbsGrams: num(entry.carbsGrams),
+    fiberGrams: num(entry.fiberGrams),
+    items: entry.items?.map(serializeNutritionItem) ?? [],
+    photo: entry.photo
+      ? {
+          id: entry.photo.id,
+          mimeType: entry.photo.mimeType,
+          sizeBytes: entry.photo.sizeBytes,
+          width: entry.photo.width,
+          height: entry.photo.height,
+          originalDeletedAt: entry.photo.originalDeletedAt,
+          createdAt: entry.photo.createdAt,
+        }
+      : null,
+    analysis: entry.analysis ?? null,
+    createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt,
+  };
+}
 function serializeExercise(e: any) {
   return {
     ...e,

@@ -8,20 +8,24 @@ datasource db {
 }
 
 model User {
-  id               String            @id @default(cuid())
-  username         String            @unique
-  passwordHash     String?
-  email            String?           @unique
-  googleSub        String?           @unique
-  displayName      String
-  heightCm         Int?
-  startingWeightKg Decimal?          @db.Decimal(6, 2)
-  createdAt        DateTime          @default(now())
-  programs         WorkoutProgram[]
-  sessions         WorkoutSession[]
-  bodyWeights      BodyWeightEntry[]
-  machines         Machine[]
-  authenticators   Authenticator[]
+  id                       String            @id @default(cuid())
+  username                 String            @unique
+  passwordHash             String?
+  email                    String?           @unique
+  googleSub                String?           @unique
+  displayName              String
+  heightCm                 Int?
+  startingWeightKg         Decimal?          @db.Decimal(6, 2)
+  goalWeightKg             Decimal?          @db.Decimal(6, 2)
+  proteinTargetMode        String            @default("automatic")
+  manualProteinTargetGrams Int?
+  createdAt                DateTime          @default(now())
+  programs                 WorkoutProgram[]
+  sessions                 WorkoutSession[]
+  bodyWeights              BodyWeightEntry[]
+  machines                 Machine[]
+  authenticators           Authenticator[]
+  nutritionEntries         NutritionEntry[]
 }
 
 model Exercise {
@@ -188,6 +192,96 @@ model BodyWeightEntry {
   notes  String?
 
   @@unique([userId, date])
+}
+
+model NutritionEntry {
+  id               String             @id @default(cuid())
+  userId           String
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  occurredAt       DateTime
+  mealType         String?
+  title            String?
+  consumedPercent  Decimal            @default(100) @db.Decimal(5, 2)
+  fullCalories     Decimal            @db.Decimal(10, 2)
+  fullProteinGrams Decimal            @db.Decimal(10, 2)
+  fullFatGrams     Decimal            @db.Decimal(10, 2)
+  fullCarbsGrams   Decimal            @db.Decimal(10, 2)
+  fullFiberGrams   Decimal            @db.Decimal(10, 2)
+  calories         Decimal            @db.Decimal(10, 2)
+  proteinGrams     Decimal            @db.Decimal(10, 2)
+  fatGrams         Decimal            @db.Decimal(10, 2)
+  carbsGrams       Decimal            @db.Decimal(10, 2)
+  fiberGrams       Decimal            @db.Decimal(10, 2)
+  items            NutritionItem[]
+  photo            NutritionPhoto?
+  analysis         NutritionAnalysis?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@index([userId, occurredAt])
+}
+
+model NutritionItem {
+  id           String         @id @default(cuid())
+  entryId      String
+  entry        NutritionEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  name         String
+  amountGrams  Decimal?       @db.Decimal(10, 2)
+  calories     Decimal        @db.Decimal(10, 2)
+  proteinGrams Decimal        @db.Decimal(10, 2)
+  fatGrams     Decimal        @db.Decimal(10, 2)
+  carbsGrams   Decimal        @db.Decimal(10, 2)
+  fiberGrams   Decimal        @db.Decimal(10, 2)
+  sortOrder    Int            @default(0)
+  createdAt    DateTime       @default(now())
+
+  @@index([entryId, sortOrder])
+}
+
+model NutritionPhoto {
+  id                  String         @id @default(cuid())
+  entryId             String         @unique
+  entry               NutritionEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  storageKey          String         @unique
+  thumbnailStorageKey String?
+  mimeType            String
+  sizeBytes           Int
+  width               Int?
+  height              Int?
+  sha256              String?
+  originalDeletedAt   DateTime?
+  createdAt           DateTime       @default(now())
+}
+
+model NutritionAnalysis {
+  id             String                   @id @default(cuid())
+  entryId        String                   @unique
+  entry          NutritionEntry           @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  state          String                   @default("draft")
+  provider       String?
+  model          String?
+  schemaVersion  String?
+  assumptions    Json?
+  uncertainty    Json?
+  analyzedAt     DateTime?
+  clarifications NutritionClarification[]
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+}
+
+model NutritionClarification {
+  id          String            @id @default(cuid())
+  analysisId  String
+  analysis    NutritionAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  questionKey String
+  question    String
+  options     Json?
+  answer      String?
+  required    Boolean           @default(true)
+  answeredAt  DateTime?
+  createdAt   DateTime          @default(now())
+
+  @@index([analysisId])
 }
 
 model Authenticator {
