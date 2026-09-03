@@ -212,17 +212,51 @@ const emptyItem = (): NutritionItem => ({
   ...emptyNutrients(),
 });
 
-const normalizeAnalysis = (raw: MealAnalysis | any): MealAnalysis => {
+const estimate = (value: any) =>
+  Number(value?.estimate ?? value ?? 0) || 0;
+
+export const normalizeMealAnalysis = (raw: MealAnalysis | any): MealAnalysis => {
   const value = raw.result || raw.analysis || raw;
+  const foods = value.items || value.foods || [emptyItem()];
+  const totals = value.totals;
+  const uncertaintyFromRange = totals
+    ? `${estimate(totals.calories?.min)}–${estimate(totals.calories?.max)} kcal · ${estimate(totals.proteinGrams?.min)}–${estimate(totals.proteinGrams?.max)} g protein`
+    : "";
   return {
     id: raw.analysisId || value.id || crypto.randomUUID(),
-    title: value.title || value.mealName || "Meal",
-    items: value.items || value.foods || [emptyItem()],
-    assumptions: value.assumptions || [],
-    uncertainty: value.uncertainty || value.uncertaintySummary || "",
-    questions: value.questions || value.clarificationQuestions || [],
-    clarificationRound: value.clarificationRound || 0,
-    thumbnailUrl: value.thumbnailUrl,
+    title: value.title || value.mealName || value.summary || "Meal",
+    items: foods.map((food: any) => ({
+      id: food.id || crypto.randomUUID(),
+      name: food.name || "Food",
+      estimatedGrams: estimate(
+        food.estimatedGrams ?? food.amountGrams ?? food.portion?.estimatedGrams,
+      ),
+      calories: estimate(food.calories),
+      proteinGrams: estimate(food.proteinGrams),
+      fatGrams: estimate(food.fatGrams),
+      carbsGrams: estimate(food.carbsGrams),
+      fiberGrams: estimate(food.fiberGrams),
+    })),
+    assumptions: (value.assumptions || []).map((assumption: any) =>
+      typeof assumption === "string" ? assumption : assumption.text,
+    ),
+    uncertainty:
+      value.uncertainty ||
+      value.uncertaintySummary ||
+      uncertaintyFromRange ||
+      value.overallConfidence ||
+      "",
+    questions: (value.questions || value.clarificationQuestions || []).map(
+      (question: any) => ({
+        id: question.id || crypto.randomUUID(),
+        text: question.text || question.question,
+        choices: question.choices || question.options || [],
+        allowFreeText: true,
+      }),
+    ),
+    clarificationRound:
+      value.clarificationRound || raw.metadata?.clarificationRound || 0,
+    thumbnailUrl: raw.thumbnailUrl || value.thumbnailUrl,
   };
 };
 
@@ -400,7 +434,7 @@ function MealEditor({ value, date, onClose, onSaved, onDelete }: { value?: Nutri
     if (!navigator.onLine) { setError(nt("offlinePhoto")); return; }
     setError(""); setStage("loading");
     try {
-      const next = normalizeAnalysis(await analyzeMeal(file));
+      const next = normalizeMealAnalysis(await analyzeMeal(file));
       setAnalysis(next); setTitle(next.title); setItems(next.items);
       setStage(next.questions.length ? "questions" : "review");
     } catch (reason: any) {
@@ -428,7 +462,7 @@ function MealEditor({ value, date, onClose, onSaved, onDelete }: { value?: Nutri
       {stage === "questions" && analysis && <Clarifications analysis={analysis} answers={answers} setAnswers={setAnswers} onManual={() => setStage("review")} onContinue={async () => {
         if (analysis.clarificationRound >= 2) { setStage("review"); return; }
         setStage("loading"); setError("");
-        try { const next = normalizeAnalysis(await clarifyMeal(analysis, answers)); setAnalysis(next); setTitle(next.title); setItems(next.items); setAnswers({}); setStage(next.questions.length && next.clarificationRound < 2 ? "questions" : "review"); }
+        try { const next = normalizeMealAnalysis(await clarifyMeal(analysis, answers)); setAnalysis(next); setTitle(next.title); setItems(next.items); setAnswers({}); setStage(next.questions.length && next.clarificationRound < 2 ? "questions" : "review"); }
         catch { setError(nt("analysisFailed")); setStage("review"); }
       }} />}
       {stage === "review" && <div className="nutrition-review">

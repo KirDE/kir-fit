@@ -6,6 +6,7 @@ import {
   scaleNutrients,
   sumItems,
 } from "./nutrition";
+import { normalizeMealAnalysis } from "./Nutrition";
 
 const values = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", {
@@ -65,6 +66,53 @@ describe("nutrition calculations", () => {
     expect(moveLocalDate("2026-03-29", -1)).toBe("2026-03-28");
     expect(moveLocalDate("2026-12-31", 1)).toBe("2027-01-01");
     expect(localDate(new Date(2026, 8, 3, 23, 30))).toBe("2026-09-03");
+  });
+
+  it("maps the structured vision response to editable flat values", () => {
+    const analysis = normalizeMealAnalysis({
+      analysisId: "analysis-1",
+      result: {
+        summary: "Chicken salad",
+        foods: [
+          {
+            name: "Chicken",
+            portion: { estimatedGrams: 180, minGrams: 150, maxGrams: 220 },
+            calories: { estimate: 300, min: 250, max: 360 },
+            proteinGrams: { estimate: 55, min: 45, max: 65 },
+            fatGrams: { estimate: 8, min: 5, max: 12 },
+            carbsGrams: { estimate: 1, min: 0, max: 2 },
+            fiberGrams: { estimate: 0, min: 0, max: 0 },
+          },
+        ],
+        totals: {
+          calories: { estimate: 300, min: 250, max: 360 },
+          proteinGrams: { estimate: 55, min: 45, max: 65 },
+        },
+        assumptions: [{ text: "No added oil", impact: "material" }],
+        clarificationQuestions: [
+          {
+            id: "sauce",
+            question: "Which dressing?",
+            options: ["Cocktail sauce", "Oil and vinegar"],
+          },
+        ],
+      },
+    });
+    expect(analysis).toMatchObject({
+      id: "analysis-1",
+      title: "Chicken salad",
+      items: [{ estimatedGrams: 180, calories: 300, proteinGrams: 55 }],
+      assumptions: ["No added oil"],
+      questions: [
+        {
+          id: "sauce",
+          text: "Which dressing?",
+          choices: ["Cocktail sauce", "Oil and vinegar"],
+          allowFreeText: true,
+        },
+      ],
+    });
+    expect(analysis.uncertainty).toContain("250–360 kcal");
   });
 });
 
