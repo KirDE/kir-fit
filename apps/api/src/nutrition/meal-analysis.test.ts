@@ -24,6 +24,22 @@ describe("meal analysis schema v1 fixtures", () => {
       expect.objectContaining({ required: true, id: "material_assumption_1" }),
     ]);
   });
+
+  it("does not duplicate material assumptions when targeted required questions exist", () => {
+    const input = structuredClone(mealAnalysisV1Fixtures[0]);
+    input.assumptions.push({
+      text: "The exact amount of dressing is unknown.",
+      impact: "material",
+      nutrientImpactPercent: 30,
+    });
+
+    const result = normalizeMealAnalysis(input);
+
+    expect(result.clarificationQuestions).toEqual(input.clarificationQuestions);
+    expect(result.clarificationQuestions).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "material_assumption_2" })]),
+    );
+  });
 });
 
 describe("OpenAI meal analysis adapter", () => {

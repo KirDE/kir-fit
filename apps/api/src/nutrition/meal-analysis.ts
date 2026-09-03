@@ -132,8 +132,15 @@ export function normalizeMealAnalysis(input: unknown): MealAnalysis {
   const parsed = mealAnalysisSchema.parse(input);
   const questions = [...parsed.clarificationQuestions];
   const knownQuestionIds = new Set(questions.map((question) => question.id));
+  const hasRequiredModelQuestion = questions.some((question) => question.required);
 
   parsed.assumptions.forEach((assumption, index) => {
+    // The provider is explicitly prompted to turn material uncertainty into
+    // targeted questions. If it did, do not append generic questions for the
+    // same assumptions: they duplicate the useful choices and force a second
+    // free-text clarification round. Synthesis remains a safety fallback for
+    // provider responses that omitted required questions entirely.
+    if (hasRequiredModelQuestion) return;
     if (assumption.impact !== "material") return;
     const assumptionText = assumption.text.toLocaleLowerCase();
     if (
@@ -325,7 +332,8 @@ const systemPrompt = `You estimate nutrition from one meal photo. Output estimat
 List each visible component and give ranges for portion and every nutrient. Do not invent invisible
 ingredients. Explicitly surface unknown oil, sauce, sugar, cream, cheese, cooking method and portion
 scale. Any uncertainty likely to change calories or protein by 15% or more is material and must have
-a short targeted clarification question. Mark the question required. If the image is not food or is
+a short targeted clarification question. Ask at most four distinct questions and combine related
+unknowns instead of repeating them. Mark the question required. If the image is not food or is
 not recognizable, set isRecognizable=false and ask the user to identify it. Do not give medical advice.`;
 
 export class OpenAiMealAnalysisProvider implements MealAnalysisProvider {
