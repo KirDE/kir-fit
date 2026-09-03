@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Nutrition } from "./Nutrition";
 import { localDate } from "./nutrition";
 
 describe("nutrition mobile workflow", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("kirfit_guest", "1");
@@ -91,5 +93,61 @@ describe("nutrition mobile workflow", () => {
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: /^delete$/i }));
     await waitFor(() => expect(screen.queryByText("Protein day")).toBeNull());
     expect(screen.getByText("No food recorded for this day.")).toBeTruthy();
+  });
+
+  it("opens completed background photo jobs and queues clarification without blocking", async () => {
+    let clarificationQueued = false;
+    const analysis = {
+      summary: "Breaded fish and vegetables",
+      foods: [{
+        name: "Breaded fish",
+        portion: { estimatedGrams: 180 },
+        calories: { estimate: 360 },
+        proteinGrams: { estimate: 30 },
+        fatGrams: { estimate: 18 },
+        carbsGrams: { estimate: 22 },
+        fiberGrams: { estimate: 1 },
+      }],
+      assumptions: [],
+      clarificationQuestions: [{
+        id: "protein",
+        question: "What is inside the breading?",
+        options: ["White fish", "Chicken"],
+      }],
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/clarify") && init?.method === "POST") {
+        clarificationQueued = true;
+        return new Response(JSON.stringify({
+          analysisId: "analysis-async-1",
+          status: "processing",
+          result: analysis,
+        }), { status: 202, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.endsWith("/api/nutrition/photos")) {
+        return new Response(JSON.stringify([{
+          analysisId: "analysis-async-1",
+          status: clarificationQueued ? "processing" : "completed",
+          createdAt: new Date().toISOString(),
+          result: analysis,
+          thumbnailUrl: null,
+          metadata: { clarificationRound: 0 },
+        }]), { status: clarificationQueued ? 202 : 200, headers: { "Content-Type": "application/json" } });
+      }
+      return new Response("{}", { status: 404 });
+    }));
+
+    render(<Nutrition />);
+    const open = await screen.findByRole("button", {
+      name: /breaded fish and vegetables.*answer questions/i,
+    });
+    fireEvent.click(open);
+    await screen.findByText("What is inside the breading?");
+    fireEvent.click(screen.getByLabelText("White fish"));
+    fireEvent.click(screen.getByRole("button", { name: /update estimate/i }));
+    await waitFor(() => expect(clarificationQueued).toBe(true));
+    await screen.findByText("Analysis in progress");
+    expect(screen.queryByText("What is inside the breading?")).toBeNull();
   });
 });
