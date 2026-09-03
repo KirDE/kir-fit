@@ -20,6 +20,7 @@ describe.skipIf(!hasDatabase)("nutrition API", () => {
   beforeAll(async () => {
     process.env.NODE_ENV = "test";
     process.env.JWT_SECRET = secret;
+    process.env.OPENAI_API_KEY = "";
     process.env.UPLOAD_DIR = `/tmp/kir-fit-api-test-${suffix}`;
     process.env.NUTRITION_PRIVATE_DIR = `/tmp/kir-fit-nutrition-test-${suffix}`;
     api = await import("./server.js");
@@ -111,6 +112,35 @@ describe.skipIf(!hasDatabase)("nutrition API", () => {
       .set("Authorization", `Bearer ${firstToken}`)
       .send({ proteinTargetMode: "automatic" });
     expect(automatic.body.calculation.targetGrams).toBe(120);
+  });
+
+  it("allows rate-limited ephemeral guest analysis without retaining the photo", async () => {
+    const image = await sharp({
+      create: { width: 64, height: 48, channels: 3, background: "green" },
+    })
+      .jpeg()
+      .toBuffer();
+    const unauthorized = await request(api.app)
+      .post("/api/nutrition/photos/analyze")
+      .set("Idempotency-Key", "guest-auth-check-1")
+      .attach("image", image, "meal.jpg");
+    expect(unauthorized.status).toBe(401);
+
+    const response = await request(api.app)
+      .post("/api/nutrition/photos/analyze")
+      .set("X-Kirfit-Device", "d9ad279e-367f-478d-8390-bd4f05d3a91f")
+      .set("Idempotency-Key", "guest-auth-check-2")
+      .attach("image", image, "meal.jpg");
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      status: "manual_required",
+      failureCode: "not_configured",
+      manualEntryAvailable: true,
+    });
+    const store = new PrivateFoodPhotoStore(process.env.NUTRITION_PRIVATE_DIR);
+    await expect(store.readManifest(response.body.analysisId)).rejects.toMatchObject({
+      code: "not_found",
+    });
   });
 
   it("creates an entry from item snapshots and protects ownership", async () => {

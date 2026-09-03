@@ -68,6 +68,7 @@ height or weight produces a `null` automatic target instead of inventing one.
   "mealType": "lunch",
   "title": "Chicken salad",
   "consumedPercent": 75,
+  "analysisId": "optional-owned-photo-analysis-uuid",
   "items": [
     {
       "name": "Chicken breast",
@@ -86,6 +87,9 @@ height or weight produces a `null` automatic target instead of inventing one.
 be 1–50 items. Names are limited to 120 characters and the entry title to 160.
 All nutrients and amounts must be non-negative. The accepted date range is
 2000–2100 and `occurredAt` must include an offset.
+When supplied, `analysisId` must identify a completed or manually corrected
+analysis owned by the authenticated user. The API retains its private thumbnail
+and safe provenance metadata with the entry.
 
 ### Read, edit and delete
 

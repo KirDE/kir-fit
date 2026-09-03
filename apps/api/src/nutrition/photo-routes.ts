@@ -74,6 +74,7 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
     asyncHandler(async (request, response) => {
       const ownerId = options.ownerId(request);
       const ephemeral = options.ephemeral?.(request) ?? false;
+      const language = requestLanguage(request);
       const idempotencyKey = request.header("Idempotency-Key") || "";
       if (!idempotencyKeyPattern.test(idempotencyKey))
         return response.status(400).json({
@@ -106,6 +107,7 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
         provider,
         request.body.retainThumbnail !== "false",
         ephemeral,
+        language,
       );
       inFlight.set(flightKey, operation);
       try {
@@ -148,12 +150,13 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
           error: "A valid Idempotency-Key header is required",
           code: "invalid_idempotency_key",
         });
-      const { answers, priorAnalysis } = z
+      const { answers, priorAnalysis, clarificationRound } = z
         .strictObject({
           answers: z.record(z.string().max(64), z.string().trim().min(1).max(500)),
           // Accepted only for rolling UI compatibility. The trusted prior result
           // is always loaded from the owner-protected server manifest.
           priorAnalysis: z.unknown().optional(),
+          clarificationRound: z.number().int().min(0).max(2).optional(),
         })
         .parse(request.body);
       if (Object.keys(answers).length === 0 || Object.keys(answers).length > 12)
@@ -162,6 +165,12 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
           code: "invalid_answers",
         });
       if (options.ephemeral?.(request)) {
+        if ((clarificationRound ?? 0) >= 2)
+          return response.status(409).json({
+            status: "manual_required",
+            reasonCode: "clarification_limit_reached",
+            manualEntryAvailable: true,
+          });
         if (!provider.refine)
           return response.status(501).json({
             status: "manual_required",
@@ -178,13 +187,21 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
           });
         }
         try {
-          const result = await provider.refine(trustedPrior, answers);
+          const result = await provider.refine(
+            trustedPrior,
+            answers,
+            undefined,
+            requestLanguage(request),
+          );
           return response.json({
             analysisId,
             status: "completed",
             analysis: result.analysis,
             result: result.analysis,
-            metadata: { ...result.metadata, clarificationRound: 1 },
+            metadata: {
+              ...result.metadata,
+              clarificationRound: (clarificationRound ?? 0) + 1,
+            },
             thumbnailUrl: null,
           });
         } catch (error) {
@@ -200,6 +217,12 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
         }
       }
       const manifest = await store.requireOwned(analysisId, ownerId);
+      if (Number(manifest.providerMetadata?.clarificationRound ?? 0) >= 2)
+        return response.status(409).json({
+          status: "manual_required",
+          reasonCode: "clarification_limit_reached",
+          manualEntryAvailable: true,
+        });
       if (!manifest.result)
         return response.status(409).json({
           error: "No completed analysis is available to clarify",
@@ -219,7 +242,12 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
       const flightKey = `${ownerId}\0clarify\0${idempotencyKey}`;
       if (inFlight.has(flightKey))
         return response.status(202).json({ analysisId, status: "processing" });
-      const operation = provider.refine(manifest.result as any, answers);
+      const operation = provider.refine(
+        manifest.result as any,
+        answers,
+        undefined,
+        requestLanguage(request),
+      );
       inFlight.set(flightKey, operation);
       try {
         const result = await operation;
@@ -289,12 +317,13 @@ async function analyzeUpload(
   provider: MealAnalysisProvider,
   retainThumbnail: boolean,
   ephemeral: boolean,
+  language: "en" | "de" | "ru",
   signal?: AbortSignal,
 ) {
   const manifest = await store.create(ownerId, idempotencyKey, bytes);
   try {
     const analysisBytes = await store.analysisBytes(manifest.analysisId, ownerId);
-    const result = await provider.analyze(analysisBytes, signal);
+    const result = await provider.analyze(analysisBytes, signal, language);
     const updated = await store.update(manifest.analysisId, ownerId, {
       status: "completed",
       result: result.analysis,
@@ -373,4 +402,11 @@ function asyncHandler(
 
 function firstParam(value: string | string[]) {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function requestLanguage(request: express.Request): "en" | "de" | "ru" {
+  const candidate = String(request.header("accept-language") || "en")
+    .toLowerCase()
+    .split(/[,-]/)[0];
+  return candidate === "ru" || candidate === "de" ? candidate : "en";
 }

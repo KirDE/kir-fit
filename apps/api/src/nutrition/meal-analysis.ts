@@ -111,11 +111,16 @@ export class MealAnalysisProviderError extends Error {
 }
 
 export interface MealAnalysisProvider {
-  analyze(image: Buffer, signal?: AbortSignal): Promise<MealAnalysisResponse>;
+  analyze(
+    image: Buffer,
+    signal?: AbortSignal,
+    language?: "en" | "de" | "ru",
+  ): Promise<MealAnalysisResponse>;
   refine?(
     prior: MealAnalysis,
     answers: Record<string, string>,
     signal?: AbortSignal,
+    language?: "en" | "de" | "ru",
   ): Promise<MealAnalysisResponse>;
 }
 
@@ -335,10 +340,14 @@ export class OpenAiMealAnalysisProvider implements MealAnalysisProvider {
     },
   ) {}
 
-  async analyze(image: Buffer, signal?: AbortSignal): Promise<MealAnalysisResponse> {
+  async analyze(
+    image: Buffer,
+    signal?: AbortSignal,
+    language: "en" | "de" | "ru" = "en",
+  ): Promise<MealAnalysisResponse> {
     return this.requestStructuredAnalysis(
       [
-        { type: "input_text", text: systemPrompt },
+        { type: "input_text", text: localizedPrompt(language) },
         {
           type: "input_image",
           image_url: `data:image/jpeg;base64,${image.toString("base64")}`,
@@ -352,12 +361,13 @@ export class OpenAiMealAnalysisProvider implements MealAnalysisProvider {
     prior: MealAnalysis,
     answers: Record<string, string>,
     signal?: AbortSignal,
+    language: "en" | "de" | "ru" = "en",
   ): Promise<MealAnalysisResponse> {
     return this.requestStructuredAnalysis(
       [
         {
           type: "input_text",
-          text: `${systemPrompt}\nRevise the prior analysis using only the user's answers below. Remove a clarification question only when its uncertainty is resolved. Preserve ranges for remaining uncertainty.\nPrior analysis: ${JSON.stringify(prior)}\nUser answers: ${JSON.stringify(answers)}`,
+          text: `${localizedPrompt(language)}\nRevise the prior analysis using only the user's answers below. Remove a clarification question only when its uncertainty is resolved. Preserve ranges for remaining uncertainty.\nPrior analysis: ${JSON.stringify(prior)}\nUser answers: ${JSON.stringify(answers)}`,
         },
       ],
       signal,
@@ -519,6 +529,11 @@ export class OpenAiMealAnalysisProvider implements MealAnalysisProvider {
       true,
     );
   }
+}
+
+function localizedPrompt(language: "en" | "de" | "ru") {
+  const name = language === "ru" ? "Russian" : language === "de" ? "German" : "English";
+  return `${systemPrompt}\nWrite all user-visible names, summaries, assumptions and clarification questions in ${name}.`;
 }
 
 export function createMealAnalysisProviderFromEnvironment() {

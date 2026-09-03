@@ -1854,6 +1854,7 @@ function Admin({ logout }: { logout: () => void }) {
                   />
                   <b>{tr("centimetersShort")}</b>
                 </span>
+                <small>{tr("heightRange")}</small>
               </label>
               <label>
                 {tr("goalWeight")}
@@ -1877,6 +1878,7 @@ function Admin({ logout }: { logout: () => void }) {
                   />
                   <b>{tr("kg")}</b>
                 </span>
+                <small>{tr("goalWeightRange")}</small>
               </label>
             </div>
             <fieldset className="nutrition-target-mode">
@@ -1934,6 +1936,7 @@ function Admin({ logout }: { logout: () => void }) {
                   />
                   <b>g</b>
                 </span>
+                <small>{tr("manualProteinRange")}</small>
               </label>
             )}
             {nutritionProfile.calculation && (
@@ -1960,8 +1963,15 @@ function Admin({ logout }: { logout: () => void }) {
               className="primary"
               disabled={
                 nutritionProfile.heightCm === null ||
+                nutritionProfile.heightCm < 100 ||
+                nutritionProfile.heightCm > 250 ||
+                (nutritionProfile.goalWeightKg !== null &&
+                  (nutritionProfile.goalWeightKg < 30 ||
+                    nutritionProfile.goalWeightKg > 500)) ||
                 (nutritionProfile.proteinTargetMode === "manual" &&
-                  nutritionProfile.manualProteinTargetGrams === null)
+                  (nutritionProfile.manualProteinTargetGrams === null ||
+                    nutritionProfile.manualProteinTargetGrams < 20 ||
+                    nutritionProfile.manualProteinTargetGrams > 400))
               }
               onClick={async () => {
                 setNutritionError("");
@@ -1979,9 +1989,7 @@ function Admin({ logout }: { logout: () => void }) {
                   setNutritionProfile(result);
                   setNutritionSaved(true);
                 } catch (error: any) {
-                  setNutritionError(
-                    error.message || tr("nutritionSettingsFailed"),
-                  );
+                  setNutritionError(tr("nutritionSettingsFailed"));
                 }
               }}
             >

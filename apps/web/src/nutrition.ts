@@ -6,6 +6,7 @@ import type {
   NutritionEntry,
   NutritionItem,
 } from "./types";
+import { getLanguage } from "./i18n";
 
 export const emptyNutrients = (): Nutrients => ({
   calories: 0,
@@ -139,6 +140,7 @@ async function analysisRequest(
   idempotencyKey?: string,
 ) {
   const headers = new Headers();
+  headers.set("Accept-Language", getLanguage());
   if (token()) headers.set("Authorization", `Bearer ${token()}`);
   if (isGuest()) headers.set("X-Kirfit-Device", analysisDeviceId());
   if (idempotencyKey) headers.set("Idempotency-Key", idempotencyKey);
@@ -173,6 +175,10 @@ export const clarifyMeal = (
 ) =>
   analysisRequest(
     `/nutrition/photos/analyze/${analysis.id}/clarify`,
-    JSON.stringify({ answers, priorAnalysis: analysis.providerResult || analysis }),
+    JSON.stringify({
+      answers,
+      priorAnalysis: analysis.providerResult || analysis,
+      clarificationRound: analysis.clarificationRound,
+    }),
     crypto.randomUUID(),
   );
