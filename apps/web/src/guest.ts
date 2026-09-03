@@ -214,6 +214,10 @@ const session = (s: any) => ({
   })),
 });
 export async function guestApi(path: string, init: RequestInit = {}) {
+  if (path.startsWith("/nutrition") || path === "/settings/nutrition") {
+    const { guestNutritionApi } = await import("./nutritionGuest");
+    return guestNutritionApi(path, init);
+  }
   const state = load();
   const method = init.method || "GET";
   if (path === "/exercises") return copy(exercises);

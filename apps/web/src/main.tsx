@@ -12,10 +12,10 @@ import {
   EllipsisVertical,
   RotateCcw,
   Settings,
-  Scale,
   SlidersHorizontal,
   Trash2,
   Undo2,
+  Utensils,
   WifiOff,
   X,
 } from "lucide-react";
@@ -43,6 +43,7 @@ import {
 import { getLanguage, setLanguage, tr } from "./i18n";
 import { paddedDomain } from "./chart";
 import type { Exercise, Session, WorkoutExercise } from "./types";
+import { Nutrition, NutritionDashboardCard } from "./Nutrition";
 import "./styles.css";
 import { registerSW } from "virtual:pwa-register";
 import "./enhancements.css";
@@ -58,7 +59,13 @@ registerSW({
       .catch(() => undefined);
   },
 });
-type View = "home" | "workout" | "history" | "progress" | "weight" | "admin";
+type View =
+  | "home"
+  | "workout"
+  | "history"
+  | "nutrition"
+  | "progress"
+  | "admin";
 const dayNames = [
   "Sunday",
   "Monday",
@@ -175,13 +182,14 @@ function App() {
         {view === "home" && (
           <Dashboard
             start={() => setView("workout")}
-            weight={() => setView("weight")}
+            weight={() => setView("progress")}
+            nutrition={() => setView("nutrition")}
           />
         )}{" "}
         {view === "workout" && <Workout done={() => setView("home")} />}{" "}
         {view === "history" && <History resume={() => setView("workout")} />}{" "}
+        {view === "nutrition" && <Nutrition />}{" "}
         {view === "progress" && <Progress />}{" "}
-        {view === "weight" && <BodyWeight />}{" "}
         {view === "admin" && (
           <Admin
             logout={() => {
@@ -197,8 +205,8 @@ function App() {
           {[
             ["home", House, tr("home")],
             ["history", HistoryIcon, tr("history")],
+            ["nutrition", Utensils, tr("nutrition")],
             ["progress", ChartIcon, tr("progress")],
-            ["weight", Scale, tr("weight")],
             ["admin", Settings, tr("settings")],
           ].map(([v, I, l]: any) => (
             <button
@@ -505,9 +513,11 @@ function Login({ done }: { done: () => void }) {
 function Dashboard({
   start,
   weight,
+  nutrition,
 }: {
   start: () => void;
   weight: () => void;
+  nutrition: () => void;
 }) {
   const [d, setD] = useState<any>();
   useEffect(() => {
@@ -537,6 +547,7 @@ function Dashboard({
           {tr(d.hasActiveWorkout ? "continueWorkout" : "startWorkout")}
         </button>
       </div>
+      <NutritionDashboardCard open={nutrition} />
       <div className="grid">
         <Card title={tr("bodyWeight")} onClick={weight}>
           <strong>
@@ -1605,6 +1616,7 @@ function Progress() {
           </Card>
         </>
       )}
+      <BodyWeight embedded />
     </section>
   );
 }
@@ -1651,7 +1663,7 @@ function Chart({
     </div>
   );
 }
-function BodyWeight() {
+function BodyWeight({ embedded = false }: { embedded?: boolean }) {
   const [rows, setRows] = useState<any[]>(),
     [weight, setWeight] = useState<number | "">(""),
     [notes, setNotes] = useState("");
@@ -1682,8 +1694,8 @@ function BodyWeight() {
   );
   if (!rows) return <Loading />;
   return (
-    <section>
-      <Header title={tr("bodyWeight")} />
+    <section className={embedded ? "weight-in-progress" : ""}>
+      {embedded ? <h2>{tr("bodyWeight")}</h2> : <Header title={tr("bodyWeight")} />}
       <div className="hero compact">
         <p className="eyebrow">{tr("current")}</p>
         <h1>
