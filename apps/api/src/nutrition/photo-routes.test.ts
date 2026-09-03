@@ -18,7 +18,10 @@ afterEach(async () => {
   await Promise.all(cleanup.splice(0).map((fn) => fn()));
 });
 
-async function testServer(provider: MealAnalysisProvider) {
+async function testServer(
+  provider: MealAnalysisProvider,
+  persistResult?: Parameters<typeof createNutritionPhotoRouter>[0]["persistResult"],
+) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "kir-fit-route-test-"));
   const app = express();
   app.use(
@@ -28,6 +31,7 @@ async function testServer(provider: MealAnalysisProvider) {
       ephemeral: (request) => request.header("x-ephemeral") === "1",
       store: new PrivateFoodPhotoStore(root),
       provider,
+      persistResult,
     }),
   );
   const server = app.listen(0);
@@ -169,6 +173,7 @@ describe("private nutrition photo routes", () => {
         },
       };
     });
+    const persistResult = vi.fn(async (input) => input.entryId || "entry-auto-1");
     const url = await testServer({
       analyze: async () => ({
         analysis: mealAnalysisV1Fixtures[0],
@@ -183,7 +188,7 @@ describe("private nutrition photo routes", () => {
         },
       }),
       refine,
-    });
+    }, persistResult);
     const uploaded = await fetch(`${url}/api/nutrition/photos/analyze`, {
       method: "POST",
       headers: { "x-test-owner": "owner-a", "Idempotency-Key": "request-1003" },
@@ -210,6 +215,7 @@ describe("private nutrition photo routes", () => {
       "x-test-owner": "owner-a",
     });
     expect(refinedBody).toMatchObject({
+      entryId: "entry-auto-1",
       result: {
         summary: "Salad with oil dressing",
         clarificationQuestions: [],
@@ -217,6 +223,11 @@ describe("private nutrition photo routes", () => {
     });
     expect((await clarify()).status).toBe(200);
     expect(refine).toHaveBeenCalledTimes(1);
+    expect(persistResult).toHaveBeenCalledTimes(2);
+    expect(persistResult.mock.calls[1][0]).toMatchObject({
+      entryId: "entry-auto-1",
+      analysisId: original.analysisId,
+    });
   });
 
   it("keeps the prior estimate and records the provider error when async clarification fails", async () => {

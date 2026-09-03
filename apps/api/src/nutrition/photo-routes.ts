@@ -10,6 +10,7 @@ import {
 } from "./food-image.js";
 import {
   createMealAnalysisProviderFromEnvironment,
+  type MealAnalysis,
   MealAnalysisProvider,
   MealAnalysisProviderError,
 } from "./meal-analysis.js";
@@ -19,6 +20,15 @@ type NutritionPhotoRouterOptions = {
   store?: PrivateFoodPhotoStore;
   provider?: MealAnalysisProvider;
   ephemeral?: (request: express.Request) => boolean;
+  persistResult?: (input: {
+    ownerId: string;
+    analysisId: string;
+    entryId?: string;
+    createdAt: string;
+    analysis: MealAnalysis;
+    metadata: Record<string, unknown>;
+    thumbnail: () => Promise<Buffer>;
+  }) => Promise<string | undefined>;
 };
 
 const idempotencyKeyPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
@@ -68,7 +78,7 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
   const launch = (manifest: Awaited<ReturnType<typeof store.requireOwned>>) => {
     const flightKey = `${manifest.ownerId}\0job\0${manifest.analysisId}`;
     if (inFlight.has(flightKey) || !manifest.pendingTask) return;
-    const operation = runPendingTask(manifest, store, provider)
+    const operation = runPendingTask(manifest, store, provider, options.persistResult)
       .catch((error) => {
         console.error(JSON.stringify({
           event: "nutrition_analysis_job_failed",
@@ -240,6 +250,20 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
     }),
   );
 
+  router.post(
+    "/:analysisId/finalize",
+    asyncHandler(async (request, response) => {
+      const analysisId = firstParam(request.params.analysisId);
+      const ownerId = options.ownerId(request);
+      await store.requireOwned(analysisId, ownerId);
+      const manifest = await store.update(analysisId, ownerId, {
+        expiresAt: new Date("9999-12-31T23:59:59.999Z").toISOString(),
+        finalizedAt: new Date().toISOString(),
+      });
+      return response.json(publicManifest(manifest));
+    }),
+  );
+
   router.use(
     (
       error: unknown,
@@ -268,6 +292,7 @@ async function runPendingTask(
   manifest: Awaited<ReturnType<PrivateFoodPhotoStore["requireOwned"]>>,
   store: PrivateFoodPhotoStore,
   provider: MealAnalysisProvider,
+  persistResult?: NutritionPhotoRouterOptions["persistResult"],
 ) {
   const task = manifest.pendingTask;
   if (!task) return;
@@ -290,9 +315,35 @@ async function runPendingTask(
     const analysis = task.kind === "clarify"
       ? { ...result.analysis, clarificationQuestions: [] }
       : result.analysis;
+    let entryId = manifest.entryId;
+    if (persistResult) {
+      try {
+        entryId = await persistResult({
+          ownerId: manifest.ownerId,
+          analysisId: manifest.analysisId,
+          entryId,
+          createdAt: manifest.createdAt,
+          analysis,
+          metadata: { ...result.metadata, clarificationRound },
+          thumbnail: () => store.thumbnail(manifest.analysisId, manifest.ownerId),
+        });
+      } catch (error) {
+        console.error(JSON.stringify({
+          event: "nutrition_analysis_entry_persist_failed",
+          analysisId: manifest.analysisId,
+          error: error instanceof Error ? error.message : String(error),
+        }));
+      }
+    }
+    const finalized = Boolean(entryId && analysis.clarificationQuestions.length === 0);
     await store.update(manifest.analysisId, manifest.ownerId, {
       status: "completed",
       result: analysis,
+      entryId,
+      ...(entryId
+        ? { expiresAt: new Date("9999-12-31T23:59:59.999Z").toISOString() }
+        : {}),
+      ...(finalized ? { finalizedAt: new Date().toISOString() } : {}),
       providerMetadata: { ...result.metadata, clarificationRound },
       failureCode: undefined,
       failureMessage: undefined,
@@ -339,6 +390,7 @@ async function runPendingTask(
 
 function publicManifest(manifest: {
   analysisId: string;
+  entryId?: string;
   status: string;
   result?: unknown;
   providerMetadata?: Record<string, unknown>;
@@ -351,6 +403,7 @@ function publicManifest(manifest: {
 }) {
   return {
     analysisId: manifest.analysisId,
+    entryId: manifest.entryId,
     status: manifest.status,
     createdAt: manifest.createdAt,
     analysis: manifest.result,

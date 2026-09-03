@@ -144,6 +144,10 @@ describe("nutrition mobile workflow", () => {
     const open = await screen.findByRole("button", {
       name: /breaded fish and vegetables.*answer questions/i,
     });
+    await waitFor(() => expect(
+      JSON.parse(localStorage.getItem("kirfit_guest_nutrition_v1") || "{}").entries?.[0]?.title,
+    ).toBe("Breaded fish and vegetables"));
+    expect(screen.getAllByText("Breaded fish and vegetables")).toHaveLength(1);
     expect(open.textContent).toMatch(/360 kcal.*30 g protein/i);
     fireEvent.click(open);
     await screen.findByText(/estimated from a photo/i);

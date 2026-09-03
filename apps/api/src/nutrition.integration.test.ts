@@ -325,6 +325,83 @@ describe.skipIf(!hasDatabase)("nutrition API", () => {
     expect(afterDelete.status).toBe(404);
   });
 
+  it("automatically creates and then updates one diary entry from photo analysis", async () => {
+    const store = new PrivateFoodPhotoStore(process.env.NUTRITION_PRIVATE_DIR);
+    const image = await sharp({
+      create: { width: 80, height: 60, channels: 3, background: "orange" },
+    }).jpeg().toBuffer();
+    const manifest = await store.create(firstUserId, "integration-photo-auto-1001", image);
+    const metadata = {
+      provider: "fixture",
+      model: "fixture-v1",
+      schemaVersion: "meal-photo-v1",
+      clarificationRound: 0,
+    };
+    const createdId = await api.persistAutomaticNutritionEntry({
+      ownerId: firstUserId,
+      analysisId: manifest.analysisId,
+      createdAt: manifest.createdAt,
+      analysis: mealAnalysisV1Fixtures[0],
+      metadata,
+      thumbnail: () => store.thumbnail(manifest.analysisId, firstUserId),
+    });
+    const created = await api.prisma.nutritionEntry.findUniqueOrThrow({
+      where: { id: createdId },
+      include: { items: true, photo: true },
+    });
+    expect(created).toMatchObject({
+      title: "Mixed salad",
+      photo: { storageKey: manifest.analysisId },
+    });
+    const edited = await request(api.app)
+      .post("/api/nutrition/entries")
+      .set("Authorization", `Bearer ${firstToken}`)
+      .send({
+        occurredAt: manifest.createdAt,
+        mealType: "dinner",
+        title: "Edited automatic estimate",
+        consumedPercent: 100,
+        analysisId: manifest.analysisId,
+        items: [{
+          name: "Edited salad",
+          amountGrams: 300,
+          calories: 400,
+          proteinGrams: 25,
+          fatGrams: 16,
+          carbsGrams: 40,
+          fiberGrams: 7,
+        }],
+      });
+    expect(edited.status).toBe(200);
+    expect(edited.body).toMatchObject({
+      id: createdId,
+      title: "Edited automatic estimate",
+      mealType: "dinner",
+    });
+
+    const refined = structuredClone(mealAnalysisV1Fixtures[0]);
+    refined.summary = "Salad with measured dressing";
+    refined.foods[0].calories.estimate = 321;
+    refined.foods[0].calories.min = 300;
+    refined.foods[0].calories.max = 350;
+    refined.clarificationQuestions = [];
+    const updatedId = await api.persistAutomaticNutritionEntry({
+      ownerId: firstUserId,
+      analysisId: manifest.analysisId,
+      entryId: createdId,
+      createdAt: manifest.createdAt,
+      analysis: refined,
+      metadata: { ...metadata, clarificationRound: 1 },
+      thumbnail: () => store.thumbnail(manifest.analysisId, firstUserId),
+    });
+    expect(updatedId).toBe(createdId);
+    expect(await api.prisma.nutritionEntry.findUniqueOrThrow({ where: { id: createdId } }))
+      .toMatchObject({ title: "Salad with measured dressing" });
+
+    await api.prisma.nutritionEntry.delete({ where: { id: createdId } });
+    await store.remove(manifest.analysisId, firstUserId);
+  });
+
   it("deletes an owned entry and cascades child items", async () => {
     const removed = await request(api.app)
       .delete(`/api/nutrition/entries/${entryId}`)

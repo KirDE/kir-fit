@@ -58,6 +58,7 @@ export type MealAnalysis = {
 
 export type PhotoAnalysisJob = {
   analysisId: string;
+  entryId?: string;
   status: "processing" | "completed" | "manual_required";
   createdAt: string;
   analysis?: unknown;

@@ -35,6 +35,7 @@ import {
 } from "./domain.js";
 import { createNutritionPhotoRouter } from "./nutrition/photo-routes.js";
 import { PrivateFoodPhotoStore } from "./nutrition/food-image.js";
+import type { MealAnalysis } from "./nutrition/meal-analysis.js";
 
 const prisma = new PrismaClient();
 const app = express();
@@ -1133,6 +1134,41 @@ app.post(
     const photoManifest = body.analysisId
       ? await nutritionPhotoStore.requireOwned(body.analysisId, userId(req))
       : null;
+    if (photoManifest) {
+      const existingPhoto = await prisma.nutritionPhoto.findUnique({
+        where: { storageKey: photoManifest.analysisId },
+        select: { entryId: true },
+      });
+      if (existingPhoto) {
+        const existingEntry = await prisma.nutritionEntry.findFirstOrThrow({
+          where: { id: existingPhoto.entryId, userId: userId(req) },
+        });
+        const updatedEntry = await prisma.$transaction(async (tx) => {
+          await tx.nutritionItem.deleteMany({ where: { entryId: existingEntry.id } });
+          return tx.nutritionEntry.update({
+            where: { id: existingEntry.id },
+            data: {
+              occurredAt,
+              mealType: body.mealType,
+              title: body.title,
+              consumedPercent: decimal(body.consumedPercent),
+              ...nutrientDatabaseFields(full, "full"),
+              ...nutrientDatabaseFields(scaled),
+              items: {
+                create: body.items.map((item, sortOrder) => ({
+                  name: item.name,
+                  amountGrams: item.amountGrams == null ? null : decimal(item.amountGrams),
+                  ...nutrientDatabaseFields(item),
+                  sortOrder,
+                })),
+              },
+            },
+            include: nutritionEntryInclude,
+          });
+        });
+        return res.json(serializeNutritionEntry(updatedEntry));
+      }
+    }
     if (photoManifest?.status === "processing")
       throw Object.assign(new Error("nutrition_analysis_still_processing"), {
         status: 409,
@@ -1397,6 +1433,7 @@ app.use(
     ownerId: userId,
     store: nutritionPhotoStore,
     ephemeral: (request: any) => request.auth?.guest === true,
+    persistResult: persistAutomaticNutritionEntry,
   }),
 );
 
@@ -1650,6 +1687,132 @@ function serializeNutritionItem(item: any) {
     fiberGrams: num(item.fiberGrams),
     ...(item.sortOrder === undefined ? {} : { sortOrder: item.sortOrder }),
   };
+}
+
+export async function persistAutomaticNutritionEntry(input: {
+  ownerId: string;
+  analysisId: string;
+  entryId?: string;
+  createdAt: string;
+  analysis: MealAnalysis;
+  metadata: Record<string, unknown>;
+  thumbnail: () => Promise<Buffer>;
+}) {
+  if (input.ownerId.startsWith("guest-")) return undefined;
+  const items = input.analysis.foods.map((food) => ({
+    name: food.name,
+    amountGrams: food.portion.estimatedGrams,
+    calories: food.calories.estimate,
+    proteinGrams: food.proteinGrams.estimate,
+    fatGrams: food.fatGrams.estimate,
+    carbsGrams: food.carbsGrams.estimate,
+    fiberGrams: food.fiberGrams.estimate,
+  }));
+  const full = sumNutrients(items);
+  const questions = input.analysis.clarificationQuestions.map((question) => ({
+    questionKey: question.id,
+    question: question.question,
+    options: question.options,
+    required: question.required,
+  }));
+  const analysisFields = {
+    state: "completed",
+    provider: typeof input.metadata.provider === "string" ? input.metadata.provider : null,
+    model: typeof input.metadata.model === "string" ? input.metadata.model : null,
+    schemaVersion: typeof input.metadata.schemaVersion === "string" ? input.metadata.schemaVersion : null,
+    assumptions: input.analysis.assumptions,
+    uncertainty: {
+      overallConfidence: input.analysis.overallConfidence,
+      alternatives: input.analysis.alternatives,
+      totals: input.analysis.totals,
+    },
+    analyzedAt: new Date(),
+  };
+  const linkedPhoto = await prisma.nutritionPhoto.findUnique({
+    where: { storageKey: input.analysisId },
+    select: { entryId: true },
+  });
+  const existingId = input.entryId || linkedPhoto?.entryId;
+  if (existingId) {
+    const existing = await prisma.nutritionEntry.findFirstOrThrow({
+      where: { id: existingId, userId: input.ownerId },
+    });
+    const consumedPercent = num(existing.consumedPercent);
+    const scaled = scaleNutrients(full, consumedPercent);
+    await prisma.$transaction(async (tx) => {
+      await tx.nutritionItem.deleteMany({ where: { entryId: existing.id } });
+      await tx.nutritionClarification.deleteMany({
+        where: { analysis: { entryId: existing.id } },
+      });
+      await tx.nutritionEntry.update({
+        where: { id: existing.id },
+        data: {
+          title: input.analysis.summary,
+          ...nutrientDatabaseFields(full, "full"),
+          ...nutrientDatabaseFields(scaled),
+          items: {
+            create: items.map((item, sortOrder) => ({
+              ...item,
+              amountGrams: decimal(item.amountGrams),
+              ...nutrientDatabaseFields(item),
+              sortOrder,
+            })),
+          },
+          analysis: {
+            upsert: {
+              create: {
+                ...analysisFields,
+                clarifications: { create: questions },
+              },
+              update: {
+                ...analysisFields,
+                clarifications: { create: questions },
+              },
+            },
+          },
+        },
+      });
+    });
+    return existing.id;
+  }
+
+  const thumbnailBytes = await input.thumbnail();
+  const entry = await prisma.nutritionEntry.create({
+    data: {
+      userId: input.ownerId,
+      occurredAt: new Date(input.createdAt),
+      mealType: "snack",
+      title: input.analysis.summary,
+      consumedPercent: decimal(100),
+      ...nutrientDatabaseFields(full, "full"),
+      ...nutrientDatabaseFields(full),
+      items: {
+        create: items.map((item, sortOrder) => ({
+          ...item,
+          amountGrams: decimal(item.amountGrams),
+          ...nutrientDatabaseFields(item),
+          sortOrder,
+        })),
+      },
+      photo: {
+        create: {
+          storageKey: input.analysisId,
+          thumbnailStorageKey: input.analysisId,
+          mimeType: "image/jpeg",
+          sizeBytes: thumbnailBytes.byteLength,
+          sha256: createHash("sha256").update(thumbnailBytes).digest("hex"),
+          originalDeletedAt: new Date(),
+        },
+      },
+      analysis: {
+        create: {
+          ...analysisFields,
+          clarifications: { create: questions },
+        },
+      },
+    },
+  });
+  return entry.id;
 }
 
 function serializeNutritionEntry(entry: any) {
