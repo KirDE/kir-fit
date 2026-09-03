@@ -247,6 +247,22 @@ const boundedAiText = (value: unknown, fallback: string, maxLength: number) => {
   return (text || fallback).slice(0, maxLength).trim();
 };
 
+const MAX_MEAL_TITLE_LENGTH = 72;
+const photoDescriptionPrefix = /^(?:на (?:этом )?(?:фото|фотографии|изображении)\s+(?:изображ(?:е|ё)н(?:а|о|ы)?|вид(?:ен|на|но|ны))|(?:this |the )?(?:photo|image)\s+(?:shows|depicts)|(?:auf (?:dem|diesem) foto (?:ist|sind)|das foto zeigt))(?=[\s,:-]|$)[\s,:-]*/iu;
+
+const conciseMealTitle = (value: unknown, foods: any[]) => {
+  const summary = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  const foodTitle = foods
+    .map((food) => typeof food?.name === "string" ? food.name.replace(/\s+/g, " ").trim() : "")
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(" + ");
+  const candidate = photoDescriptionPrefix.test(summary) && foodTitle
+    ? foodTitle
+    : summary.replace(photoDescriptionPrefix, "").split(/[,;]|\s+[—–]\s+/u, 1)[0].trim();
+  return boundedAiText(candidate, "Meal", MAX_MEAL_TITLE_LENGTH);
+};
+
 export const normalizeMealAnalysis = (raw: MealAnalysis | any): MealAnalysis => {
   const value = raw.result || raw.analysis || raw;
   const foods = value.items || value.foods || [emptyItem()];
@@ -258,11 +274,7 @@ export const normalizeMealAnalysis = (raw: MealAnalysis | any): MealAnalysis => 
     id: raw.analysisId || value.id || crypto.randomUUID(),
     // Model output is untrusted and may be longer than the editable/API fields.
     // Keep the generated values inside the same limits enforced by the form.
-    title: boundedAiText(
-      value.title || value.mealName || value.summary,
-      "Meal",
-      120,
-    ),
+    title: conciseMealTitle(value.title || value.mealName || value.summary, foods),
     items: foods.map((food: any) => ({
       id: food.id || crypto.randomUUID(),
       name: boundedAiText(food.name, "Food", 120),

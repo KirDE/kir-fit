@@ -50,6 +50,30 @@ const meal = {
 
 afterEach(() => vi.unstubAllGlobals());
 
+describe("meal analysis normalization", () => {
+  it("replaces a verbose photo description with a concise food title", () => {
+    const normalized = normalizeMealAnalysis({
+      analysisId: "analysis-title-test",
+      result: {
+        summary: "На фото изображен пакетик порошкового крем-супа со вкусом спаржи от Knorr, приготовленный только с водой",
+        foods: [{
+          name: "Крем-суп из спаржи Knorr",
+          portion: { estimatedGrams: 250 },
+          calories: { estimate: 180 },
+          proteinGrams: { estimate: 4 },
+          fatGrams: { estimate: 6 },
+          carbsGrams: { estimate: 28 },
+          fiberGrams: { estimate: 2 },
+        }],
+        assumptions: [],
+        clarificationQuestions: [],
+      },
+    });
+
+    expect(normalized.title).toBe("Крем-суп из спаржи Knorr");
+  });
+});
+
 describe("nutrition calculations", () => {
   beforeEach(() => values.clear());
 
@@ -223,7 +247,7 @@ describe("nutrition calculations", () => {
       ),
     );
     expect(refined.id).toBe(analysisId);
-    expect(refined.title.length).toBeLessThanOrEqual(120);
+    expect(refined.title.length).toBeLessThanOrEqual(72);
     expect(refined.items[0].name.length).toBeLessThanOrEqual(120);
 
     await saveNutritionEntry({
