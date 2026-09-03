@@ -16,8 +16,8 @@ jobs:
     env:
       DATABASE_URL: postgresql://kirfit:test-password@localhost:5432/kirfit?schema=public
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with: {node-version: 22, cache: npm}
       - run: npm ci
       - run: npm exec -w @kir-fit/api -- prisma validate --schema prisma/schema.prisma
