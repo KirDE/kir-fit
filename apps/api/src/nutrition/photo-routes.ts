@@ -193,7 +193,10 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
       const manifest = await store.requireOwned(analysisId, ownerId);
       if (manifest.status === "processing")
         return response.status(202).json(publicManifest(manifest));
-      if (Number(manifest.providerMetadata?.clarificationRound ?? 0) >= 2)
+      const refinementHash = hashIdempotency(ownerId, idempotencyKey);
+      if (manifest.refinementIdempotencyHash === refinementHash)
+        return response.json(publicManifest(manifest));
+      if (Number(manifest.providerMetadata?.clarificationRound ?? 0) >= 1)
         return response.status(409).json({
           status: "manual_required",
           reasonCode: "clarification_limit_reached",
@@ -205,9 +208,6 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
           code: "analysis_not_completed",
           manualEntryAvailable: true,
         });
-      const refinementHash = hashIdempotency(ownerId, idempotencyKey);
-      if (manifest.refinementIdempotencyHash === refinementHash)
-        return response.json(publicManifest(manifest));
       if (!provider.refine)
         return response.status(501).json({
           status: "manual_required",
@@ -287,9 +287,12 @@ async function runPendingTask(
     const clarificationRound = task.kind === "clarify"
       ? Number(manifest.providerMetadata?.clarificationRound ?? 0) + 1
       : Number(manifest.providerMetadata?.clarificationRound ?? 0);
+    const analysis = task.kind === "clarify"
+      ? { ...result.analysis, clarificationQuestions: [] }
+      : result.analysis;
     await store.update(manifest.analysisId, manifest.ownerId, {
       status: "completed",
-      result: result.analysis,
+      result: analysis,
       providerMetadata: { ...result.metadata, clarificationRound },
       failureCode: undefined,
       failureMessage: undefined,
