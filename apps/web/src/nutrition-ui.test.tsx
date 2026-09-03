@@ -150,4 +150,45 @@ describe("nutrition mobile workflow", () => {
     await screen.findByText("Analysis in progress");
     expect(screen.queryByText("What is inside the breading?")).toBeNull();
   });
+
+  it("offers review instead of more questions after the clarification limit", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/api/nutrition/photos")) {
+        return new Response(JSON.stringify([{
+          analysisId: "analysis-final-review",
+          status: "completed",
+          createdAt: new Date().toISOString(),
+          result: {
+            summary: "Final fish estimate",
+            foods: [{
+              name: "Fish",
+              portion: { estimatedGrams: 180 },
+              calories: { estimate: 360 },
+              proteinGrams: { estimate: 30 },
+              fatGrams: { estimate: 18 },
+              carbsGrams: { estimate: 22 },
+              fiberGrams: { estimate: 1 },
+            }],
+            assumptions: [],
+            clarificationQuestions: [{
+              id: "extra",
+              question: "Another detail?",
+              options: ["Yes", "No"],
+            }],
+          },
+          metadata: { clarificationRound: 2 },
+          thumbnailUrl: null,
+        }]), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return new Response("{}", { status: 404 });
+    }));
+
+    render(<Nutrition />);
+    const open = await screen.findByRole("button", {
+      name: /final fish estimate.*review estimate/i,
+    });
+    fireEvent.click(open);
+    await screen.findByRole("heading", { name: /review meal/i });
+    expect(screen.queryByText("Another detail?")).toBeNull();
+  });
 });
