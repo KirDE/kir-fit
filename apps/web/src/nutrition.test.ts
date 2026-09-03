@@ -4,6 +4,7 @@ import {
   localDate,
   moveLocalDate,
   analyzeMeal,
+  clarifyMeal,
   saveNutritionEntry,
   scaleNutrients,
   sumItems,
@@ -166,6 +167,80 @@ describe("nutrition calculations", () => {
     const saveCall = fetchMock.mock.calls[1];
     const body = JSON.parse(String(saveCall[1]?.body));
     expect(body.analysisId).toBe("7ed9bb35-40ab-4fe4-a78f-2cafb9d2381e");
+  });
+
+  it("bounds long AI text after clarification and saves the analyzed meal", async () => {
+    values.set("kirfit_token", "test-token");
+    const analysisId = "7ed9bb35-40ab-4fe4-a78f-2cafb9d2381e";
+    const longTitle = "Очень подробное описание блюда ".repeat(10);
+    const longFoodName = "Очень подробное название компонента ".repeat(8);
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes("/clarify")) {
+        return new Response(
+          JSON.stringify({
+            analysisId,
+            status: "completed",
+            result: {
+              summary: longTitle,
+              foods: [
+                {
+                  name: longFoodName,
+                  portion: { estimatedGrams: 250 },
+                  calories: { estimate: 420 },
+                  proteinGrams: { estimate: 32 },
+                  fatGrams: { estimate: 18 },
+                  carbsGrams: { estimate: 30 },
+                  fiberGrams: { estimate: 6 },
+                },
+              ],
+              assumptions: [],
+              clarificationQuestions: [],
+            },
+            metadata: { clarificationRound: 2 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ id: "entry-after-clarification" }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const refined = normalizeMealAnalysis(
+      await clarifyMeal(
+        {
+          id: analysisId,
+          title: "Meal",
+          items: meal.items,
+          assumptions: [],
+          questions: [{ id: "sauce", text: "Соус?", choices: ["Масло"] }],
+          clarificationRound: 1,
+          providerResult: { summary: "Meal", foods: [] },
+        },
+        { sauce: "Масло" },
+      ),
+    );
+    expect(refined.id).toBe(analysisId);
+    expect(refined.title.length).toBeLessThanOrEqual(120);
+    expect(refined.items[0].name.length).toBeLessThanOrEqual(120);
+
+    await saveNutritionEntry({
+      occurredAt: meal.occurredAt,
+      mealType: meal.mealType,
+      title: refined.title,
+      consumedPercent: 100,
+      items: refined.items,
+      ...sumItems(refined.items),
+      originalAnalysis: refined,
+    });
+    const saveBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(saveBody).toMatchObject({
+      analysisId,
+      title: refined.title,
+      items: [{ name: refined.items[0].name }],
+    });
   });
 });
 
