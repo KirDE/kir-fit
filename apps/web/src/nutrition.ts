@@ -214,3 +214,9 @@ export async function deletePhotoAnalysis(analysisId: string) {
   if (!response.ok && response.status !== 404)
     throw new Error("analysis-delete-unavailable");
 }
+
+export const finalizePhotoAnalysis = (analysisId: string) =>
+  analysisRequest(
+    `/nutrition/photos/${encodeURIComponent(analysisId)}/finalize`,
+    "{}",
+  );

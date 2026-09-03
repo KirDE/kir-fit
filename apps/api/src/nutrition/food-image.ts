@@ -13,6 +13,7 @@ export type SupportedFoodImage = "jpeg" | "png" | "webp" | "heif";
 
 export type PrivatePhotoManifest = {
   analysisId: string;
+  entryId?: string;
   ownerId: string;
   idempotencyHash: string;
   createdAt: string;

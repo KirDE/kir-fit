@@ -19,6 +19,7 @@ import {
   analysisHeaders,
   clarifyMeal,
   deletePhotoAnalysis,
+  finalizePhotoAnalysis,
   deleteNutritionEntry,
   emptyNutrients,
   localDate,
@@ -232,6 +233,35 @@ const copy = {
 type NutritionMessage = keyof (typeof copy)["en"];
 const nt = (key: NutritionMessage) => copy[getLanguage()][key];
 
+const GUEST_ANALYSIS_LINKS_KEY = "kirfit_guest_nutrition_analysis_links_v1";
+type GuestAnalysisLink = { entryId: string; signature: string };
+const readGuestAnalysisLinks = (): Record<string, GuestAnalysisLink> => {
+  try {
+    return JSON.parse(localStorage.getItem(GUEST_ANALYSIS_LINKS_KEY) || "{}");
+  } catch {
+    return {};
+  }
+};
+const writeGuestAnalysisLinks = (links: Record<string, GuestAnalysisLink>) =>
+  localStorage.setItem(GUEST_ANALYSIS_LINKS_KEY, JSON.stringify(links));
+const analysisSignature = (job: PhotoAnalysisJob) => JSON.stringify([
+  job.metadata?.clarificationRound || 0,
+  job.result || job.analysis,
+]);
+
+async function localThumbnail(src?: string) {
+  if (!src) return null;
+  const response = await fetch(src, { headers: analysisHeaders() });
+  if (!response.ok) return null;
+  const blob = await response.blob();
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
 const emptyItem = (): NutritionItem => ({
   id: crypto.randomUUID(),
   name: "",
@@ -346,6 +376,8 @@ export function Nutrition() {
   const [error, setError] = useState("");
   const [editor, setEditor] = useState<NutritionEntry | PhotoAnalysisJob | "new">();
   const [deleteTarget, setDeleteTarget] = useState<NutritionEntry>();
+  const [guestLinks, setGuestLinks] = useState(readGuestAnalysisLinks);
+  const guestSaving = useRef(new Set<string>());
   const load = () => {
     setLoading(true);
     setError("");
@@ -356,27 +388,97 @@ export function Nutrition() {
   };
   useEffect(load, [date]);
   useEffect(() => {
+    if (token()) return;
+    let cancelled = false;
+    jobs.forEach((job) => {
+      if (job.status === "processing" || !(job.result || job.analysis)) return;
+      const signature = analysisSignature(job);
+      const link = guestLinks[job.analysisId];
+      if (link?.signature === signature || guestSaving.current.has(job.analysisId)) return;
+      guestSaving.current.add(job.analysisId);
+      const analysis = normalizeMealAnalysis(job);
+      void (async () => {
+        try {
+          const thumbnailUrl = link ? undefined : await localThumbnail(analysis.thumbnailUrl);
+          const full = sumItems(analysis.items);
+          const saved = await saveNutritionEntry({
+            id: link?.entryId,
+            occurredAt: job.createdAt || new Date().toISOString(),
+            mealType: "snack",
+            title: analysis.title,
+            consumedPercent: 100,
+            items: analysis.items,
+            ...full,
+            thumbnailUrl: thumbnailUrl || undefined,
+            assumptions: analysis.assumptions,
+            uncertainty: analysis.uncertainty,
+            originalAnalysis: analysis,
+          });
+          const nextLinks = {
+            ...readGuestAnalysisLinks(),
+            [job.analysisId]: { entryId: saved.id, signature },
+          };
+          writeGuestAnalysisLinks(nextLinks);
+          if (!cancelled) setGuestLinks(nextLinks);
+          if (!analysis.questions.length || analysis.clarificationRound >= 1) {
+            const deleted = await deletePhotoAnalysis(job.analysisId)
+              .then(() => true)
+              .catch(() => false);
+            if (deleted) {
+              const remaining = { ...nextLinks };
+              delete remaining[job.analysisId];
+              writeGuestAnalysisLinks(remaining);
+              if (!cancelled) setGuestLinks(remaining);
+            }
+          }
+          const [nextDay, nextJobs] = await Promise.all([
+            nutritionDay(date),
+            photoAnalysisJobs().catch(() => []),
+          ]);
+          if (!cancelled) {
+            setDay(nextDay);
+            setJobs(nextJobs);
+          }
+        } finally {
+          guestSaving.current.delete(job.analysisId);
+        }
+      })().catch(() => undefined);
+    });
+    return () => { cancelled = true; };
+  }, [date, guestLinks, jobs]);
+  useEffect(() => {
     if (!jobs.some((job) => job.status === "processing")) return;
     const timer = window.setInterval(() => {
-      photoAnalysisJobs().then(setJobs).catch(() => undefined);
+      Promise.all([photoAnalysisJobs(), nutritionDay(date)])
+        .then(([nextJobs, nextDay]) => { setJobs(nextJobs); setDay(nextDay); })
+        .catch(() => undefined);
     }, 3000);
     return () => window.clearInterval(timer);
-  }, [jobs]);
+  }, [date, jobs]);
   const percent = day?.proteinTarget
     ? Math.round((day.totals.proteinGrams / day.proteinTarget) * 100)
     : 0;
   const difference = Math.round(
     (day?.proteinTarget || 0) - (day?.totals.proteinGrams || 0),
   );
+  const visibleJobs = useMemo(
+    () => jobs.map((job) => ({
+      ...job,
+      entryId: job.entryId || guestLinks[job.analysisId]?.entryId,
+    })),
+    [guestLinks, jobs],
+  );
   const grouped = useMemo(
-    () =>
-      (["breakfast", "lunch", "dinner", "snack"] as const)
+    () => {
+      const linkedEntryIds = new Set(visibleJobs.map((job) => job.entryId).filter(Boolean));
+      return (["breakfast", "lunch", "dinner", "snack"] as const)
         .map((type) => ({
           type,
-          entries: day?.entries.filter((entry) => entry.mealType === type) || [],
+          entries: day?.entries.filter((entry) => entry.mealType === type && !linkedEntryIds.has(entry.id)) || [],
         }))
-        .filter((group) => group.entries.length),
-    [day],
+        .filter((group) => group.entries.length);
+    },
+    [day, visibleJobs],
   );
   return (
     <section className="nutrition-page">
@@ -406,11 +508,15 @@ export function Nutrition() {
           <MacroGrid nutrients={day.totals} />
           <button className="primary nutrition-add" onClick={() => setEditor("new")}><Plus /> {nt("addFood")}</button>
           <div className="nutrition-entries">
-            {jobs.map((job) => <PhotoAnalysisCard
+            {visibleJobs.map((job) => <PhotoAnalysisCard
               key={job.analysisId}
               job={job}
               onOpen={() => setEditor(job)}
-              onDelete={async () => { await deletePhotoAnalysis(job.analysisId); load(); }}
+              onDelete={async () => {
+                if (job.entryId) await finalizePhotoAnalysis(job.analysisId);
+                else await deletePhotoAnalysis(job.analysisId);
+                load();
+              }}
             />)}
             {grouped.map((group) => (
               <div key={group.type} className="nutrition-meal-group">
@@ -572,6 +678,7 @@ function MealEditor({ value, job, date, onClose, onQueued, onSaved, onDelete }: 
   const full = sumItems(items);
   const occurredAt =
     value?.occurredAt ||
+    job?.createdAt ||
     new Date(`${date}T${new Date().toTimeString().slice(0, 8)}`).toISOString();
   return <div className="nutrition-modal" role="dialog" aria-modal="true" aria-labelledby="meal-editor-title">
     <div className="nutrition-modal-panel">
@@ -604,7 +711,7 @@ function MealEditor({ value, job, date, onClose, onQueued, onSaved, onDelete }: 
         {consumedPercent === 0 && <p className="nutrition-alert">{nt("discardZero")}</p>}
         <button className="primary nutrition-save" disabled={saving || consumedPercent === 0 || !title.trim() || items.some(item => !item.name.trim())} onClick={async () => {
           setSaving(true); setError("");
-          try { await saveNutritionEntry({ id: value?.id, occurredAt, mealType, title: title.trim(), consumedPercent, items, ...full, thumbnailUrl: analysis?.thumbnailUrl || value?.thumbnailUrl, assumptions: analysis?.assumptions || value?.assumptions, uncertainty: analysis?.uncertainty || value?.uncertainty, originalAnalysis: value?.originalAnalysis || analysis }); if (!token() && analysis) await deletePhotoAnalysis(analysis.id).catch(() => undefined); onSaved(); }
+          try { await saveNutritionEntry({ id: value?.id || job?.entryId, occurredAt, mealType, title: title.trim(), consumedPercent, items, ...full, thumbnailUrl: analysis?.thumbnailUrl || value?.thumbnailUrl, assumptions: analysis?.assumptions || value?.assumptions, uncertainty: analysis?.uncertainty || value?.uncertainty, originalAnalysis: value?.originalAnalysis || analysis }); if (!token() && analysis) await deletePhotoAnalysis(analysis.id).catch(() => undefined); else if (job?.entryId) await finalizePhotoAnalysis(job.analysisId).catch(() => undefined); onSaved(); }
           catch { setError(nt("saveFailed")); setSaving(false); }
         }}>{nt("save")}</button>
         {onDelete && <button className="nutrition-delete" onClick={onDelete}><Trash2 /> {nt("delete")}</button>}
