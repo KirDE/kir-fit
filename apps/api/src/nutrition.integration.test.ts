@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import jwt from "jsonwebtoken";
 import request from "supertest";
+import sharp from "sharp";
+import { PrivateFoodPhotoStore } from "./nutrition/food-image.js";
+import { mealAnalysisV1Fixtures } from "./nutrition/fixtures/meal-analysis-v1.js";
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
 
@@ -18,6 +21,7 @@ describe.skipIf(!hasDatabase)("nutrition API", () => {
     process.env.NODE_ENV = "test";
     process.env.JWT_SECRET = secret;
     process.env.UPLOAD_DIR = `/tmp/kir-fit-api-test-${suffix}`;
+    process.env.NUTRITION_PRIVATE_DIR = `/tmp/kir-fit-nutrition-test-${suffix}`;
     api = await import("./server.js");
     const [first, second] = await Promise.all([
       api.prisma.user.create({
@@ -201,6 +205,78 @@ describe.skipIf(!hasDatabase)("nutrition API", () => {
       date: "2026-03-30",
       totals: { calories: 215, proteinGrams: 32.5 },
     });
+  });
+
+  it("attaches an owned private analysis and removes its thumbnail with the entry", async () => {
+    const store = new PrivateFoodPhotoStore(process.env.NUTRITION_PRIVATE_DIR);
+    const image = await sharp({
+      create: {
+        width: 80,
+        height: 60,
+        channels: 3,
+        background: "tomato",
+      },
+    })
+      .jpeg()
+      .toBuffer();
+    const manifest = await store.create(firstUserId, "integration-photo-1001", image);
+    await store.update(manifest.analysisId, firstUserId, {
+      status: "completed",
+      result: mealAnalysisV1Fixtures[0],
+      providerMetadata: {
+        provider: "fixture",
+        model: "fixture-v1",
+        schemaVersion: "meal-photo-v1",
+      },
+    });
+
+    const created = await request(api.app)
+      .post("/api/nutrition/entries")
+      .set("Authorization", `Bearer ${firstToken}`)
+      .send({
+        occurredAt: "2026-09-03T12:00:00.000Z",
+        mealType: "lunch",
+        title: "Analyzed salad",
+        consumedPercent: 100,
+        analysisId: manifest.analysisId,
+        items: [
+          {
+            name: "Salad",
+            amountGrams: 250,
+            calories: 300,
+            proteinGrams: 10,
+            fatGrams: 20,
+            carbsGrams: 25,
+            fiberGrams: 6,
+          },
+        ],
+      });
+    expect(created.status).toBe(201);
+    expect(created.body).toMatchObject({
+      photo: {
+        analysisId: manifest.analysisId,
+        thumbnailUrl: `/api/nutrition/photos/${manifest.analysisId}/thumbnail`,
+      },
+      analysis: { state: "completed", provider: "fixture" },
+    });
+
+    const ownThumbnail = await request(api.app)
+      .get(created.body.photo.thumbnailUrl)
+      .set("Authorization", `Bearer ${firstToken}`);
+    expect(ownThumbnail.status).toBe(200);
+    const stolenThumbnail = await request(api.app)
+      .get(created.body.photo.thumbnailUrl)
+      .set("Authorization", `Bearer ${secondToken}`);
+    expect(stolenThumbnail.status).toBe(403);
+
+    const removed = await request(api.app)
+      .delete(`/api/nutrition/entries/${created.body.id}`)
+      .set("Authorization", `Bearer ${firstToken}`);
+    expect(removed.status).toBe(204);
+    const afterDelete = await request(api.app)
+      .get(created.body.photo.thumbnailUrl)
+      .set("Authorization", `Bearer ${firstToken}`);
+    expect(afterDelete.status).toBe(404);
   });
 
   it("deletes an owned entry and cascades child items", async () => {

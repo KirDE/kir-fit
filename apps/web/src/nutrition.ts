@@ -97,6 +97,9 @@ export const saveNutritionEntry = (
     mealType: entry.mealType,
     title: entry.title,
     consumedPercent: entry.consumedPercent,
+    ...(!entry.id && entry.originalAnalysis && typeof entry.originalAnalysis === "object"
+      ? { analysisId: (entry.originalAnalysis as MealAnalysis).id }
+      : {}),
     items: entry.items.map((item) => ({
       name: item.name,
       amountGrams: item.estimatedGrams,
@@ -156,7 +159,7 @@ export const analyzeMeal = (file: File) => {
   if (!file.type.startsWith("image/")) throw new Error("invalid-image");
   if (file.size > 10 * 1024 * 1024) throw new Error("image-too-large");
   const body = new FormData();
-  body.set("photo", file);
+  body.set("image", file);
   return analysisRequest(
     "/nutrition/photos/analyze",
     body,

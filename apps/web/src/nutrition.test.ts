@@ -1,8 +1,10 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { guestApi } from "./guest";
 import {
   localDate,
   moveLocalDate,
+  analyzeMeal,
+  saveNutritionEntry,
   scaleNutrients,
   sumItems,
 } from "./nutrition";
@@ -20,7 +22,7 @@ Object.defineProperty(globalThis, "localStorage", {
 
 const meal = {
   occurredAt: "2026-09-03T12:00:00",
-  mealType: "lunch",
+  mealType: "lunch" as const,
   title: "Chicken salad",
   consumedPercent: 50,
   items: [
@@ -44,6 +46,8 @@ const meal = {
     },
   ],
 };
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("nutrition calculations", () => {
   beforeEach(() => values.clear());
@@ -113,6 +117,55 @@ describe("nutrition calculations", () => {
       ],
     });
     expect(analysis.uncertainty).toContain("250–360 kcal");
+  });
+
+  it("uses the server photo contract and attaches analysisId when saving", async () => {
+    values.set("kirfit_token", "test-token");
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.body instanceof FormData) {
+        expect(init.body.get("image")).toBeTruthy();
+        expect(init.body.get("photo")).toBeNull();
+        return new Response(
+          JSON.stringify({
+            analysisId: "7ed9bb35-40ab-4fe4-a78f-2cafb9d2381e",
+            status: "completed",
+            result: { summary: "Meal", foods: [] },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ id: "entry-1" }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await analyzeMeal(
+      new File([new Uint8Array([0xff, 0xd8, 0xff])], "meal.jpg", {
+        type: "image/jpeg",
+      }),
+    );
+    await saveNutritionEntry({
+      ...meal,
+      id: undefined,
+      calories: 540,
+      proteinGrams: 66,
+      fatGrams: 22.2,
+      carbsGrams: 15,
+      fiberGrams: 5,
+      originalAnalysis: {
+        id: "7ed9bb35-40ab-4fe4-a78f-2cafb9d2381e",
+        title: "Meal",
+        items: [],
+        assumptions: [],
+        questions: [],
+        clarificationRound: 0,
+      },
+    });
+    const saveCall = fetchMock.mock.calls[1];
+    const body = JSON.parse(String(saveCall[1]?.body));
+    expect(body.analysisId).toBe("7ed9bb35-40ab-4fe4-a78f-2cafb9d2381e");
   });
 });
 

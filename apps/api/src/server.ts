@@ -9,7 +9,7 @@ import { OAuth2Client } from "google-auth-library";
 import multer from "multer";
 import path from "node:path";
 import fs from "node:fs";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -33,9 +33,12 @@ import {
   type Nutrients,
   type ProteinTargetMode,
 } from "./domain.js";
+import { createNutritionPhotoRouter } from "./nutrition/photo-routes.js";
+import { PrivateFoodPhotoStore } from "./nutrition/food-image.js";
 
 const prisma = new PrismaClient();
 const app = express();
+const nutritionPhotoStore = new PrivateFoodPhotoStore();
 const secret = process.env.JWT_SECRET;
 if (!secret || secret.length < 32)
   throw new Error("JWT_SECRET must be at least 32 characters");
@@ -105,6 +108,9 @@ const entryFieldsSchema = z.object({
   consumedPercent: z.number().min(0).max(100),
   items: z.array(nutritionItemSchema).min(1).max(50),
 }).strict();
+const createEntrySchema = entryFieldsSchema.extend({
+  analysisId: z.string().uuid().optional(),
+});
 const localDateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -1088,11 +1094,27 @@ app.post(
   "/api/nutrition/entries",
   auth,
   asyncRoute(async (req, res) => {
-    const body = entryFieldsSchema.parse(req.body);
+    const body = createEntrySchema.parse(req.body);
     const occurredAt = new Date(body.occurredAt);
     validateNutritionDate(occurredAt);
     const full = sumNutrients(body.items);
     const scaled = scaleNutrients(full, body.consumedPercent);
+    const photoManifest = body.analysisId
+      ? await nutritionPhotoStore.requireOwned(body.analysisId, userId(req))
+      : null;
+    if (photoManifest?.status === "processing")
+      throw Object.assign(new Error("nutrition_analysis_still_processing"), {
+        status: 409,
+      });
+    if (photoManifest?.status === "completed" && !photoManifest.result)
+      throw Object.assign(new Error("nutrition_analysis_result_missing"), {
+        status: 409,
+      });
+    const thumbnailBytes = photoManifest?.thumbnailFile
+      ? await nutritionPhotoStore.thumbnail(photoManifest.analysisId, userId(req))
+      : null;
+    const analysisResult = photoManifest?.result as any;
+    const providerMetadata = photoManifest?.providerMetadata as any;
     const entry = await prisma.nutritionEntry.create({
       data: {
         userId: userId(req),
@@ -1113,9 +1135,62 @@ app.post(
             sortOrder: index,
           })),
         },
+        photo: photoManifest
+          ? {
+              create: {
+                storageKey: photoManifest.analysisId,
+                thumbnailStorageKey: thumbnailBytes
+                  ? photoManifest.analysisId
+                  : null,
+                mimeType: "image/jpeg",
+                sizeBytes: thumbnailBytes?.byteLength ?? 0,
+                sha256: thumbnailBytes
+                  ? createHash("sha256").update(thumbnailBytes).digest("hex")
+                  : null,
+                originalDeletedAt: new Date(),
+              },
+            }
+          : undefined,
+        analysis: photoManifest
+          ? {
+              create: {
+                state: photoManifest.status,
+                provider: providerMetadata?.provider ?? null,
+                model: providerMetadata?.model ?? null,
+                schemaVersion: providerMetadata?.schemaVersion ?? null,
+                assumptions: analysisResult?.assumptions ?? undefined,
+                uncertainty: analysisResult
+                  ? {
+                      overallConfidence: analysisResult.overallConfidence,
+                      alternatives: analysisResult.alternatives ?? [],
+                      totals: analysisResult.totals ?? null,
+                    }
+                  : undefined,
+                analyzedAt:
+                  photoManifest.status === "completed" ? new Date() : null,
+                clarifications: analysisResult?.clarificationQuestions?.length
+                  ? {
+                      create: analysisResult.clarificationQuestions.map(
+                        (question: any) => ({
+                          questionKey: question.id,
+                          question: question.question,
+                          options: question.options ?? [],
+                          required: question.required ?? true,
+                        }),
+                      ),
+                    }
+                  : undefined,
+              },
+            }
+          : undefined,
       },
       include: nutritionEntryInclude,
     });
+    if (photoManifest) {
+      await nutritionPhotoStore.update(photoManifest.analysisId, userId(req), {
+        expiresAt: new Date("9999-12-31T23:59:59.999Z").toISOString(),
+      });
+    }
     res.status(201).json(serializeNutritionEntry(entry));
   }),
 );
@@ -1189,9 +1264,18 @@ app.delete(
   "/api/nutrition/entries/:id",
   auth,
   asyncRoute(async (req, res) => {
-    await prisma.nutritionEntry.delete({
+    const existing = await prisma.nutritionEntry.findFirstOrThrow({
       where: { id: req.params.id, userId: userId(req) },
+      include: { photo: true },
     });
+    await prisma.nutritionEntry.delete({
+      where: { id: existing.id },
+    });
+    if (existing.photo?.storageKey) {
+      await nutritionPhotoStore
+        .remove(existing.photo.storageKey, userId(req))
+        .catch(() => undefined);
+    }
     res.status(204).end();
   }),
 );
@@ -1272,6 +1356,12 @@ app.get(
         target === null ? null : Math.max(0, Math.round((totals.proteinGrams - target) * 100) / 100),
     });
   }),
+);
+
+app.use(
+  "/api/nutrition/photos",
+  auth,
+  createNutritionPhotoRouter({ ownerId: userId, store: nutritionPhotoStore }),
 );
 
 const uploads = path.resolve(process.env.UPLOAD_DIR || "/app/uploads");
@@ -1547,6 +1637,10 @@ function serializeNutritionEntry(entry: any) {
     photo: entry.photo
       ? {
           id: entry.photo.id,
+          analysisId: entry.photo.storageKey,
+          thumbnailUrl: entry.photo.thumbnailStorageKey
+            ? `/api/nutrition/photos/${entry.photo.storageKey}/thumbnail`
+            : null,
           mimeType: entry.photo.mimeType,
           sizeBytes: entry.photo.sizeBytes,
           width: entry.photo.width,

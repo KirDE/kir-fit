@@ -31,6 +31,29 @@ docker compose up -d app
 
 Open `http://localhost:3210`. Uploaded images and PostgreSQL data live in named Docker volumes.
 
+### Private nutrition photos
+
+Meal photos use the separate `nutrition_private` volume mounted at
+`/app/private/nutrition`; it must never be mounted below the web root or served
+with `express.static`. Uploads are decoded from content (not their filename or
+request MIME), orientation-normalized, resized and re-encoded without metadata.
+The analysis derivative is deleted after every completed or failed provider
+attempt. A private thumbnail remains for a pending/saved journal entry and is
+only served through an authenticated ownership-checking API route. Unattached
+analysis jobs expire after 24 hours.
+
+Production backup jobs should include the `nutrition_private` Docker volume
+together with PostgreSQL. Restore it with owner-only permissions (`0700` on the
+directory and `0600` on manifests) and never copy it to `/app/uploads`. A restore
+test consists of mounting the restored volume into a non-public test container,
+reading a thumbnail through the authenticated route as its owner, and verifying
+that another account receives `403` without any bytes.
+
+`OPENAI_API_KEY` is a server-only deployment secret. It must not use a `VITE_`
+prefix, be passed as a Docker build argument, or be included in frontend config.
+`OPENAI_VISION_MODEL`, `NUTRITION_AI_RATE_LIMIT` and `NUTRITION_PRIVATE_DIR` are
+non-secret runtime settings.
+
 ## Production
 
 Google sign-in uses Google Identity Services. Create an OAuth 2.0 **Web application** client, add `https://fit.kir-it.de` as an authorized JavaScript origin, and set `GOOGLE_CLIENT_ID` in `.env`. The same ID is injected into the frontend at build time and verified by the API.
