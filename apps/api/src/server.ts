@@ -20,6 +20,7 @@ import {
   verifyAuthenticationResponse,
 } from "@simplewebauthn/server";
 import { nextWorkoutDay, shouldSuggestIncrease, volume } from "./domain.js";
+import { createNutritionPhotoRouter } from "./nutrition/photo-routes.js";
 
 const prisma = new PrismaClient();
 const app = express();
@@ -953,6 +954,12 @@ app.post(
     });
     res.status(201).json({ ...row, weight: num(row.weight) });
   }),
+);
+
+app.use(
+  "/api/nutrition/photos",
+  auth,
+  createNutritionPhotoRouter({ ownerId: userId }),
 );
 
 const uploads = path.resolve(process.env.UPLOAD_DIR || "/app/uploads");
