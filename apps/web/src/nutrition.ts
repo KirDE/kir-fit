@@ -1,6 +1,7 @@
 import { api, isGuest, token } from "./api";
 import type {
   MealAnalysis,
+  PhotoAnalysisJob,
   Nutrients,
   NutritionDay,
   NutritionEntry,
@@ -134,15 +135,20 @@ const analysisDeviceId = () => {
   return id;
 };
 
+export function analysisHeaders() {
+  const headers = new Headers();
+  headers.set("Accept-Language", getLanguage());
+  if (token()) headers.set("Authorization", `Bearer ${token()}`);
+  if (isGuest()) headers.set("X-Kirfit-Device", analysisDeviceId());
+  return headers;
+}
+
 async function analysisRequest(
   path: string,
   body: FormData | string,
   idempotencyKey?: string,
 ) {
-  const headers = new Headers();
-  headers.set("Accept-Language", getLanguage());
-  if (token()) headers.set("Authorization", `Bearer ${token()}`);
-  if (isGuest()) headers.set("X-Kirfit-Device", analysisDeviceId());
+  const headers = analysisHeaders();
   if (idempotencyKey) headers.set("Idempotency-Key", idempotencyKey);
   if (typeof body === "string") headers.set("Content-Type", "application/json");
   const response = await fetch(`/api${path}`, { method: "POST", headers, body });
@@ -153,8 +159,7 @@ async function analysisRequest(
     throw error;
   }
   const result = await response.json();
-  if (result.status === "manual_required") throw new Error("manual-required");
-  return result as MealAnalysis;
+  return result as PhotoAnalysisJob;
 }
 
 export const analyzeMeal = (file: File) => {
@@ -182,3 +187,30 @@ export const clarifyMeal = (
     }),
     crypto.randomUUID(),
   );
+
+export async function photoAnalysisJobs() {
+  const response = await fetch("/api/nutrition/photos", {
+    headers: analysisHeaders(),
+  });
+  if (!response.ok) throw new Error("analysis-list-unavailable");
+  return (await response.json()) as PhotoAnalysisJob[];
+}
+
+export async function photoAnalysisStatus(analysisId: string) {
+  const response = await fetch(
+    `/api/nutrition/photos/${encodeURIComponent(analysisId)}/status`,
+    { headers: analysisHeaders() },
+  );
+  if (!response.ok && response.status !== 202)
+    throw new Error("analysis-status-unavailable");
+  return (await response.json()) as PhotoAnalysisJob;
+}
+
+export async function deletePhotoAnalysis(analysisId: string) {
+  const response = await fetch(
+    `/api/nutrition/photos/${encodeURIComponent(analysisId)}`,
+    { method: "DELETE", headers: analysisHeaders() },
+  );
+  if (!response.ok && response.status !== 404)
+    throw new Error("analysis-delete-unavailable");
+}

@@ -24,7 +24,22 @@ export type PrivatePhotoManifest = {
   result?: unknown;
   providerMetadata?: Record<string, unknown>;
   failureCode?: string;
+  failureMessage?: string;
+  retryable?: boolean;
   refinementIdempotencyHash?: string;
+  finalizedAt?: string;
+  pendingTask?:
+    | {
+        kind: "analyze";
+        language: "en" | "de" | "ru";
+        retainThumbnail: boolean;
+      }
+    | {
+        kind: "clarify";
+        language: "en" | "de" | "ru";
+        answers: Record<string, string>;
+        refinementIdempotencyHash: string;
+      };
 };
 
 export class FoodImageError extends Error {
@@ -118,6 +133,38 @@ export class PrivateFoodPhotoStore {
       }
     }
     return null;
+  }
+
+  async listByOwner(ownerId: string) {
+    await this.initialize();
+    const manifests: PrivatePhotoManifest[] = [];
+    for (const entry of await fs.readdir(this.root, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !validAnalysisId.test(entry.name)) continue;
+      try {
+        const manifest = await this.readManifest(entry.name);
+        if (manifest.ownerId === ownerId && !manifest.finalizedAt)
+          manifests.push(manifest);
+      } catch {
+        // Concurrent cleanup may remove a manifest while the list is read.
+      }
+    }
+    return manifests.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async listPending() {
+    await this.initialize();
+    const manifests: PrivatePhotoManifest[] = [];
+    for (const entry of await fs.readdir(this.root, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !validAnalysisId.test(entry.name)) continue;
+      try {
+        const manifest = await this.readManifest(entry.name);
+        if (manifest.status === "processing" && manifest.pendingTask)
+          manifests.push(manifest);
+      } catch {
+        // Concurrent cleanup may remove a manifest while the list is read.
+      }
+    }
+    return manifests;
   }
 
   async create(
