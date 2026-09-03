@@ -215,6 +215,11 @@ const emptyItem = (): NutritionItem => ({
 const estimate = (value: any) =>
   Number(value?.estimate ?? value ?? 0) || 0;
 
+const boundedAiText = (value: unknown, fallback: string, maxLength: number) => {
+  const text = typeof value === "string" ? value.trim() : "";
+  return (text || fallback).slice(0, maxLength).trim();
+};
+
 export const normalizeMealAnalysis = (raw: MealAnalysis | any): MealAnalysis => {
   const value = raw.result || raw.analysis || raw;
   const foods = value.items || value.foods || [emptyItem()];
@@ -224,10 +229,16 @@ export const normalizeMealAnalysis = (raw: MealAnalysis | any): MealAnalysis => 
     : "";
   return {
     id: raw.analysisId || value.id || crypto.randomUUID(),
-    title: value.title || value.mealName || value.summary || "Meal",
+    // Model output is untrusted and may be longer than the editable/API fields.
+    // Keep the generated values inside the same limits enforced by the form.
+    title: boundedAiText(
+      value.title || value.mealName || value.summary,
+      "Meal",
+      120,
+    ),
     items: foods.map((food: any) => ({
       id: food.id || crypto.randomUUID(),
-      name: food.name || "Food",
+      name: boundedAiText(food.name, "Food", 120),
       estimatedGrams: estimate(
         food.estimatedGrams ?? food.amountGrams ?? food.portion?.estimatedGrams,
       ),
