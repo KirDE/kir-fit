@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Nutrition } from "./Nutrition";
+import { Nutrition, NutritionDashboardCard } from "./Nutrition";
 import { localDate } from "./nutrition";
 
 describe("nutrition mobile workflow", () => {
@@ -44,6 +44,51 @@ describe("nutrition mobile workflow", () => {
     await screen.findByText("Protein bowl");
     expect(screen.getByText("30 g")).toBeTruthy();
     expect(screen.getByText("300 kcal")).toBeTruthy();
+  });
+
+  it("includes today's completed photo estimates on the home dashboard", async () => {
+    localStorage.setItem(
+      "kirfit_guest_nutrition_v1",
+      JSON.stringify({
+        profile: {
+          heightCm: 180,
+          goalWeightKg: null,
+          proteinTargetMode: "manual",
+          manualProteinTargetGrams: 100,
+        },
+        entries: [],
+      }),
+    );
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/api/nutrition/photos")) {
+        return new Response(JSON.stringify([{
+          analysisId: "analysis-dashboard-1",
+          status: "completed",
+          createdAt: new Date().toISOString(),
+          result: {
+            summary: "Protein meal",
+            foods: [{
+              name: "Chicken",
+              portion: { estimatedGrams: 200 },
+              calories: { estimate: 420 },
+              proteinGrams: { estimate: 35 },
+              fatGrams: { estimate: 14 },
+              carbsGrams: { estimate: 30 },
+              fiberGrams: { estimate: 4 },
+            }],
+            assumptions: [],
+            clarificationQuestions: [],
+          },
+        }]), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return new Response("{}", { status: 404 });
+    }));
+
+    const { container } = render(<NutritionDashboardCard open={() => undefined} />);
+
+    const dashboard = await within(container).findByRole("button", { name: /protein/i });
+    expect(dashboard.textContent).toMatch(/35 \/ 100 g/);
+    expect(dashboard.textContent).toMatch(/35% · 420 kcal/);
   });
 
   it("shows uncapped protein percent and updates after deleting an entry", async () => {

@@ -316,25 +316,53 @@ export const normalizeMealAnalysis = (raw: MealAnalysis | any): MealAnalysis => 
   };
 };
 
+const photoJobsForDate = (jobs: PhotoAnalysisJob[], date: string) =>
+  jobs.filter((job) => localDate(new Date(job.createdAt)) === date);
+
+const nutritionTotalsWithPhotoJobs = (
+  day: NutritionDay | undefined,
+  jobs: PhotoAnalysisJob[],
+  date: string,
+) => {
+  const totals = { ...(day?.totals || emptyNutrients()) };
+  for (const job of photoJobsForDate(jobs, date)) {
+    if (!job.result && !job.analysis) continue;
+    const estimate = sumItems(normalizeMealAnalysis(job).items);
+    totals.calories += estimate.calories;
+    totals.proteinGrams += estimate.proteinGrams;
+    totals.fatGrams += estimate.fatGrams;
+    totals.carbsGrams += estimate.carbsGrams;
+    totals.fiberGrams += estimate.fiberGrams;
+  }
+  return totals;
+};
+
 export function NutritionDashboardCard({ open }: { open: () => void }) {
   const [day, setDay] = useState<NutritionDay>();
+  const [jobs, setJobs] = useState<PhotoAnalysisJob[]>([]);
   useEffect(() => {
-    nutritionDay(localDate()).then(setDay).catch(() => undefined);
+    Promise.all([nutritionDay(localDate()), photoAnalysisJobs().catch(() => [])])
+      .then(([nextDay, nextJobs]) => {
+        setDay(nextDay);
+        setJobs(nextJobs);
+      })
+      .catch(() => undefined);
   }, []);
   if (!day) return null;
+  const totals = nutritionTotalsWithPhotoJobs(day, jobs, localDate());
   const percent = day.proteinTarget
-    ? Math.round((day.totals.proteinGrams / day.proteinTarget) * 100)
+    ? Math.round((totals.proteinGrams / day.proteinTarget) * 100)
     : 0;
-  const difference = Math.round(day.proteinTarget - day.totals.proteinGrams);
+  const difference = Math.round(day.proteinTarget - totals.proteinGrams);
   return (
     <button className="nutrition-dashboard-card" onClick={open}>
       <span>{nt("protein")}</span>
       <strong>
-        {day.totals.proteinGrams} / {day.proteinTarget || "—"} {nt("gramShort")}
+        {totals.proteinGrams} / {day.proteinTarget || "—"} {nt("gramShort")}
       </strong>
       <i><b style={{ width: `${Math.min(100, percent)}%` }} /></i>
       <small>
-        {percent}% · {day.totals.calories} kcal
+        {percent}% · {totals.calories} kcal
         {day.proteinTarget > 0 &&
           ` · ${Math.abs(difference)} ${nt("gramShort")} ${difference >= 0 ? nt("remaining") : nt("excess")}`}
       </small>
@@ -370,22 +398,13 @@ export function Nutrition() {
     return () => window.clearInterval(timer);
   }, [jobs]);
   const visibleJobs = useMemo(
-    () => jobs.filter((job) => localDate(new Date(job.createdAt)) === date),
+    () => photoJobsForDate(jobs, date),
     [date, jobs],
   );
-  const displayedTotals = useMemo(() => {
-    const totals = { ...(day?.totals || emptyNutrients()) };
-    for (const job of visibleJobs) {
-      if (!job.result && !job.analysis) continue;
-      const estimate = sumItems(normalizeMealAnalysis(job).items);
-      totals.calories += estimate.calories;
-      totals.proteinGrams += estimate.proteinGrams;
-      totals.fatGrams += estimate.fatGrams;
-      totals.carbsGrams += estimate.carbsGrams;
-      totals.fiberGrams += estimate.fiberGrams;
-    }
-    return totals;
-  }, [day, visibleJobs]);
+  const displayedTotals = useMemo(
+    () => nutritionTotalsWithPhotoJobs(day, jobs, date),
+    [date, day, jobs],
+  );
   const percent = day?.proteinTarget
     ? Math.round((displayedTotals.proteinGrams / day.proteinTarget) * 100)
     : 0;
