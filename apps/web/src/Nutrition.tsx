@@ -232,6 +232,11 @@ const copy = {
 type NutritionMessage = keyof (typeof copy)["en"];
 const nt = (key: NutritionMessage) => copy[getLanguage()][key];
 
+type PendingPhotoUpload = {
+  id: string;
+  previewUrl: string;
+};
+
 const emptyItem = (): NutritionItem => ({
   id: crypto.randomUUID(),
   name: "",
@@ -342,19 +347,21 @@ export function Nutrition() {
   const [date, setDate] = useState(localDate());
   const [day, setDay] = useState<NutritionDay>();
   const [jobs, setJobs] = useState<PhotoAnalysisJob[]>([]);
+  const [pendingUploads, setPendingUploads] = useState<PendingPhotoUpload[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [uploadError, setUploadError] = useState("");
   const [editor, setEditor] = useState<NutritionEntry | PhotoAnalysisJob | "new">();
   const [deleteTarget, setDeleteTarget] = useState<NutritionEntry>();
-  const load = () => {
-    setLoading(true);
+  const load = (showLoading = true) => {
+    if (showLoading) setLoading(true);
     setError("");
-    Promise.all([nutritionDay(date), photoAnalysisJobs().catch(() => [])])
+    return Promise.all([nutritionDay(date), photoAnalysisJobs().catch(() => [])])
       .then(([nextDay, nextJobs]) => { setDay(nextDay); setJobs(nextJobs); })
       .catch(() => setError(nt("loadFailed")))
-      .finally(() => setLoading(false));
+      .finally(() => showLoading && setLoading(false));
   };
-  useEffect(load, [date]);
+  useEffect(() => { void load(); }, [date]);
   useEffect(() => {
     if (!jobs.some((job) => job.status === "processing")) return;
     const timer = window.setInterval(() => {
@@ -362,11 +369,28 @@ export function Nutrition() {
     }, 3000);
     return () => window.clearInterval(timer);
   }, [jobs]);
+  const visibleJobs = useMemo(
+    () => jobs.filter((job) => localDate(new Date(job.createdAt)) === date),
+    [date, jobs],
+  );
+  const displayedTotals = useMemo(() => {
+    const totals = { ...(day?.totals || emptyNutrients()) };
+    for (const job of visibleJobs) {
+      if (!job.result && !job.analysis) continue;
+      const estimate = sumItems(normalizeMealAnalysis(job).items);
+      totals.calories += estimate.calories;
+      totals.proteinGrams += estimate.proteinGrams;
+      totals.fatGrams += estimate.fatGrams;
+      totals.carbsGrams += estimate.carbsGrams;
+      totals.fiberGrams += estimate.fiberGrams;
+    }
+    return totals;
+  }, [day, visibleJobs]);
   const percent = day?.proteinTarget
-    ? Math.round((day.totals.proteinGrams / day.proteinTarget) * 100)
+    ? Math.round((displayedTotals.proteinGrams / day.proteinTarget) * 100)
     : 0;
   const difference = Math.round(
-    (day?.proteinTarget || 0) - (day?.totals.proteinGrams || 0),
+    (day?.proteinTarget || 0) - displayedTotals.proteinGrams,
   );
   const grouped = useMemo(
     () =>
@@ -390,7 +414,7 @@ export function Nutrition() {
         <button aria-label="Next day" onClick={() => setDate(moveLocalDate(date, 1))} disabled={date >= localDate()}><ChevronRight /></button>
       </div>
       {loading ? <div className="nutrition-loading" aria-busy="true">…</div> : error ? (
-        <div className="card error"><p>{error}</p><button onClick={load}>{nt("retry")}</button></div>
+        <div className="card error"><p>{error}</p><button onClick={() => load()}>{nt("retry")}</button></div>
       ) : day && (
         <>
           <div className={`nutrition-protein ${percent >= 100 ? "reached" : ""}`}>
@@ -398,15 +422,17 @@ export function Nutrition() {
               <span><strong>{percent}%</strong><small>{nt("protein")}</small></span>
             </div>
             <div>
-              <strong>{day.totals.proteinGrams} / {day.proteinTarget || "—"} {nt("gramShort")}</strong>
+              <strong>{displayedTotals.proteinGrams} / {day.proteinTarget || "—"} {nt("gramShort")}</strong>
               <span>{day.proteinTarget ? `${Math.abs(difference)} ${nt("gramShort")} ${difference >= 0 ? nt("remaining") : nt("excess")}` : nt("noTarget")}</span>
               {percent >= 100 && <em>{percent > 100 ? nt("targetExceeded") : nt("targetReached")}</em>}
             </div>
           </div>
-          <MacroGrid nutrients={day.totals} />
+          <MacroGrid nutrients={displayedTotals} />
           <button className="primary nutrition-add" onClick={() => setEditor("new")}><Plus /> {nt("addFood")}</button>
+          {uploadError && <p className="nutrition-alert error">{uploadError}</p>}
           <div className="nutrition-entries">
-            {jobs.map((job) => <PhotoAnalysisCard
+            {pendingUploads.map((upload) => <PendingPhotoUploadCard key={upload.id} upload={upload} />)}
+            {visibleJobs.map((job) => <PhotoAnalysisCard
               key={job.analysisId}
               job={job}
               onOpen={() => setEditor(job)}
@@ -425,7 +451,7 @@ export function Nutrition() {
                 ))}
               </div>
             ))}
-            {!day.entries.length && !jobs.length && <div className="nutrition-empty"><Utensils /><p>{nt("empty")}</p></div>}
+            {!day.entries.length && !visibleJobs.length && !pendingUploads.length && <div className="nutrition-empty"><Utensils /><p>{nt("empty")}</p></div>}
           </div>
         </>
       )}
@@ -434,13 +460,36 @@ export function Nutrition() {
         job={editor !== "new" && "analysisId" in editor ? editor : undefined}
         date={date}
         onClose={() => setEditor(undefined)}
-        onQueued={() => { setEditor(undefined); load(); }}
+        onUpload={(file) => {
+          const upload = { id: crypto.randomUUID(), previewUrl: URL.createObjectURL(file) };
+          setUploadError("");
+          setPendingUploads((current) => [upload, ...current]);
+          setEditor(undefined);
+          void analyzeMeal(file)
+            .then(() => load(false))
+            .catch(() => setUploadError(nt("analysisFailed")))
+            .finally(() => {
+              URL.revokeObjectURL(upload.previewUrl);
+              setPendingUploads((current) => current.filter((item) => item.id !== upload.id));
+            });
+        }}
+        onQueued={() => { setEditor(undefined); load(false); }}
         onSaved={() => { setEditor(undefined); load(); }}
         onDelete={editor !== "new" && "id" in editor ? () => setDeleteTarget(editor) : undefined}
       />}
       {deleteTarget && <ConfirmDelete entry={deleteTarget} onCancel={() => setDeleteTarget(undefined)} onDeleted={() => { setDeleteTarget(undefined); setEditor(undefined); load(); }} />}
     </section>
   );
+}
+
+function PendingPhotoUploadCard({ upload }: { upload: PendingPhotoUpload }) {
+  return <div className="nutrition-entry nutrition-analysis-card processing" aria-live="polite" aria-busy="true">
+    <div className="nutrition-analysis-open nutrition-upload-pending">
+      <img src={upload.previewUrl} alt="" />
+      <span><b>{nt("processing")}</b><small>{nt("analyzing")}</small></span>
+      <RefreshCw className="nutrition-spin" />
+    </div>
+  </div>;
 }
 
 function PhotoAnalysisCard({ job, onOpen, onDelete }: {
@@ -521,11 +570,12 @@ function MacroGrid({ nutrients }: { nutrients: Nutrients }) {
   </div>;
 }
 
-function MealEditor({ value, job, date, onClose, onQueued, onSaved, onDelete }: {
+function MealEditor({ value, job, date, onClose, onUpload, onQueued, onSaved, onDelete }: {
   value?: NutritionEntry;
   job?: PhotoAnalysisJob;
   date: string;
   onClose: () => void;
+  onUpload: (file: File) => void;
   onQueued: () => void;
   onSaved: () => void;
   onDelete?: () => void;
@@ -560,14 +610,9 @@ function MealEditor({ value, job, date, onClose, onQueued, onSaved, onDelete }: 
   const chooseFile = async (file?: File) => {
     if (!file) return;
     if (!navigator.onLine) { setError(nt("offlinePhoto")); return; }
-    setError("");
-    try {
-      await analyzeMeal(file);
-      onQueued();
-    } catch (reason: any) {
-      setError(reason.message === "image-too-large" ? nt("tooLarge") : reason.message === "invalid-image" ? nt("invalidImage") : nt("analysisFailed"));
-      setStage("choose");
-    }
+    if (!file.type.startsWith("image/")) { setError(nt("invalidImage")); return; }
+    if (file.size > 10 * 1024 * 1024) { setError(nt("tooLarge")); return; }
+    onUpload(file);
   };
   const full = sumItems(items);
   const occurredAt =

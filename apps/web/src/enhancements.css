@@ -393,6 +393,7 @@
   text-align: left;
 }
 .nutrition-analysis-open > span:nth-child(2) { min-width: 0; display: grid; gap: 4px; }
+.nutrition-upload-pending { width: 100%; }
 .nutrition-analysis-delete { width: 46px; border: 0; border-left: 1px solid var(--line); background: var(--panel2); color: var(--muted); }
 .nutrition-spin { animation: spin 1.2s linear infinite; color: var(--accent); }
 .nutrition-empty,

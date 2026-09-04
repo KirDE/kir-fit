@@ -140,10 +140,12 @@ describe("nutrition mobile workflow", () => {
       return new Response("{}", { status: 404 });
     }));
 
-    render(<Nutrition />);
+    const { container } = render(<Nutrition />);
     const open = await screen.findByRole("button", {
       name: /breaded fish and vegetables.*answer questions/i,
     });
+    expect(container.querySelector(".nutrition-protein")?.textContent).toMatch(/30 \/ — g/);
+    expect(container.querySelector(".nutrition-macros")?.textContent).toMatch(/360kcal/);
     expect(open.textContent).toMatch(/360 kcal.*30 g protein/i);
     fireEvent.click(open);
     await screen.findByText(/estimated from a photo/i);
@@ -155,6 +157,44 @@ describe("nutrition mobile workflow", () => {
     await waitFor(() => expect(clarificationQueued).toBe(true));
     await screen.findByText("Analysis in progress");
     expect(screen.queryByText("What is inside the breading?")).toBeNull();
+  });
+
+  it("closes the chooser immediately and shows an uploading photo card", async () => {
+    let finishUpload!: (response: Response) => void;
+    const uploadResponse = new Promise<Response>((resolve) => { finishUpload = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/nutrition/photos/analyze") && init?.method === "POST")
+        return uploadResponse;
+      if (url.endsWith("/api/nutrition/photos"))
+        return new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } });
+      return new Response("{}", { status: 404 });
+    }));
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: vi.fn(() => "blob:meal-preview"),
+      revokeObjectURL: vi.fn(),
+    });
+
+    const { container } = render(<Nutrition />);
+    await screen.findByText("No food recorded for this day.");
+    fireEvent.click(within(container).getByRole("button", { name: /add food/i }));
+    const input = container.querySelector('input[type="file"][capture="environment"]') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File(["photo"], "meal.jpg", { type: "image/jpeg" })] },
+    });
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    const pending = await screen.findByText("Estimating food and portions…");
+    expect(pending.closest(".nutrition-analysis-card")?.getAttribute("aria-busy")).toBe("true");
+    expect(container.querySelector('img[src="blob:meal-preview"]')).toBeTruthy();
+
+    finishUpload(new Response(JSON.stringify({
+      analysisId: "analysis-upload-1",
+      status: "processing",
+      createdAt: new Date().toISOString(),
+    }), { status: 202, headers: { "Content-Type": "application/json" } }));
+    await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:meal-preview"));
   });
 
   it("offers review instead of more questions after the clarification limit", async () => {
