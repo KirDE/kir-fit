@@ -74,6 +74,10 @@ export const mealAnalysisSchema = z.strictObject({
   clarificationQuestions: z.array(clarificationSchema).max(12),
   overallConfidence: z.enum(["high", "medium", "low"]),
   isRecognizable: z.boolean(),
+  sources: z.array(z.strictObject({
+    title: z.string().trim().min(1).max(300),
+    url: z.string().url().max(2_000),
+  })).max(10).optional(),
 });
 
 export type MealAnalysis = z.infer<typeof mealAnalysisSchema>;
@@ -86,6 +90,8 @@ export type MealAnalysisMetadata = {
   inputTokens: number | null;
   outputTokens: number | null;
   estimatedCostUsd: number | null;
+  webSearchUsed?: boolean;
+  sourceCount?: number;
 };
 
 export type MealAnalysisResponse = {
@@ -360,7 +366,11 @@ ingredients. Explicitly surface unknown oil, sauce, sugar, cream, cheese, cookin
 scale. Any uncertainty likely to change calories or protein by 15% or more is material and must have
 a short targeted clarification question. Ask at most four distinct questions and combine related
 unknowns instead of repeating them. Mark the question required. If the image is not food or is
-not recognizable, set isRecognizable=false and ask the user to identify it. Do not give medical advice.`;
+not recognizable, set isRecognizable=false and ask the user to identify it. Use web search when
+visible packaging, a brand, a product label, a restaurant item, or an unfamiliar named dish could
+materially improve identification or nutrition estimates. Do not search for generic recognizable
+foods. Treat search results as supporting evidence, not as proof of the photographed portion. Do
+not give medical advice.`;
 
 export class OpenAiMealAnalysisProvider implements MealAnalysisProvider {
   constructor(
@@ -456,6 +466,8 @@ export class OpenAiMealAnalysisProvider implements MealAnalysisProvider {
                   schema: mealAnalysisJsonSchema,
                 },
               },
+              tools: [{ type: "web_search", search_context_size: "low" }],
+              tool_choice: "auto",
             }),
           },
         );
@@ -502,7 +514,7 @@ export class OpenAiMealAnalysisProvider implements MealAnalysisProvider {
             "The photo could not be analyzed; enter the meal manually",
             false,
           );
-        const outputText = extractOutputText(payload);
+        const { text: outputText, sources, webSearchUsed } = extractOutput(payload);
         if (!outputText)
           throw new MealAnalysisProviderError(
             "malformed_response",
@@ -529,6 +541,7 @@ export class OpenAiMealAnalysisProvider implements MealAnalysisProvider {
             false,
           );
         }
+        if (sources.length) analysis.sources = sources;
         return {
           analysis,
           metadata: {
@@ -539,6 +552,8 @@ export class OpenAiMealAnalysisProvider implements MealAnalysisProvider {
             inputTokens: finiteInteger(payload.usage?.input_tokens),
             outputTokens: finiteInteger(payload.usage?.output_tokens),
             estimatedCostUsd: null,
+            webSearchUsed,
+            sourceCount: sources.length,
           },
         };
       } catch (error) {
@@ -577,15 +592,29 @@ export function createMealAnalysisProviderFromEnvironment() {
   });
 }
 
-function extractOutputText(payload: any) {
-  if (typeof payload.output_text === "string") return payload.output_text;
+function extractOutput(payload: any) {
+  let text = typeof payload.output_text === "string" ? payload.output_text : null;
+  const sources = new Map<string, { title: string; url: string }>();
+  let webSearchUsed = false;
   for (const output of payload.output || []) {
+    if (output.type === "web_search_call") webSearchUsed = true;
     for (const content of output.content || []) {
-      if (content.type === "output_text" && typeof content.text === "string")
-        return content.text;
+      if (content.type !== "output_text") continue;
+      if (!text && typeof content.text === "string") text = content.text;
+      for (const annotation of content.annotations || []) {
+        if (
+          annotation.type !== "url_citation" ||
+          typeof annotation.url !== "string" ||
+          !/^https?:\/\//i.test(annotation.url)
+        ) continue;
+        const title = typeof annotation.title === "string" && annotation.title.trim()
+          ? annotation.title.trim().slice(0, 300)
+          : new URL(annotation.url).hostname;
+        sources.set(annotation.url, { title, url: annotation.url });
+      }
     }
   }
-  return null;
+  return { text, sources: [...sources.values()].slice(0, 10), webSearchUsed };
 }
 
 function finiteInteger(value: unknown) {

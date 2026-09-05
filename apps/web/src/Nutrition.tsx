@@ -88,6 +88,7 @@ const copy = {
     fullServing: "Values for the full photographed serving",
     assumptions: "Assumptions",
     uncertainty: "Uncertainty",
+    sources: "Sources",
     addItem: "Add food item",
     save: "Save to journal",
     discardZero: "0% does not add anything. Close this form to discard it.",
@@ -158,6 +159,7 @@ const copy = {
     fullServing: "Werte für die vollständig fotografierte Portion",
     assumptions: "Annahmen",
     uncertainty: "Unsicherheit",
+    sources: "Quellen",
     addItem: "Lebensmittel hinzufügen",
     save: "Im Tagebuch speichern",
     discardZero: "0 % wird nicht erfasst. Schließe das Formular zum Verwerfen.",
@@ -228,6 +230,7 @@ const copy = {
     fullServing: "Значения для всей порции на фото",
     assumptions: "Предположения",
     uncertainty: "Неопределённость",
+    sources: "Источники",
     addItem: "Добавить продукт",
     save: "Сохранить в дневник",
     discardZero: "0% ничего не добавит. Закройте форму, чтобы отменить.",
@@ -336,6 +339,14 @@ export const normalizeMealAnalysis = (raw: MealAnalysis | any): MealAnalysis => 
       value.clarificationRound || raw.metadata?.clarificationRound || 0,
     thumbnailUrl: raw.thumbnailUrl || value.thumbnailUrl,
     providerResult: value,
+    sources: (value.sources || [])
+      .filter((source: any) =>
+        typeof source?.title === "string" &&
+        typeof source?.url === "string" &&
+        /^https?:\/\//i.test(source.url),
+      )
+      .slice(0, 10)
+      .map((source: any) => ({ title: source.title, url: source.url })),
   };
 };
 
@@ -696,7 +707,7 @@ function MealEditor({ value, job, date, onClose, onUpload, onQueued, onSaved, on
         catch { setError(nt("analysisFailed")); }
       }} /></>}
       {stage === "review" && <div className="nutrition-review">
-        {analysis && <div className="nutrition-estimate"><b>{nt("estimated")}</b>{analysis.uncertainty && <p><strong>{nt("uncertainty")}:</strong> {analysis.uncertainty}</p>}{analysis.assumptions.length > 0 && <details><summary>{nt("assumptions")}</summary><ul>{analysis.assumptions.map((item, index) => <li key={index}>{item}</li>)}</ul></details>}</div>}
+        {analysis && <div className="nutrition-estimate"><b>{nt("estimated")}</b>{analysis.uncertainty && <p><strong>{nt("uncertainty")}:</strong> {analysis.uncertainty}</p>}{analysis.assumptions.length > 0 && <details><summary>{nt("assumptions")}</summary><ul>{analysis.assumptions.map((item, index) => <li key={index}>{item}</li>)}</ul></details>}{analysis.sources && analysis.sources.length > 0 && <details><summary>{nt("sources")}</summary><ul>{analysis.sources.map((source) => <li key={source.url}><a href={source.url} target="_blank" rel="noreferrer">{source.title}</a></li>)}</ul></details>}</div>}
         <label>{nt("mealName")}<input value={title} maxLength={120} onChange={(event) => setTitle(event.target.value)} /></label>
         <label>{nt("manual")}<select value={mealType} onChange={(event) => setMealType(event.target.value as NutritionEntry["mealType"])}>{(["breakfast", "lunch", "dinner", "snack"] as const).map(type => <option key={type} value={type}>{nt(type)}</option>)}</select></label>
         <p className="nutrition-full-serving">{nt("fullServing")}</p>

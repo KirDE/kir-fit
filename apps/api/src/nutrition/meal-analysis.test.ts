@@ -57,10 +57,21 @@ describe("OpenAI meal analysis adapter", () => {
       expect(request.text.format.strict).toBe(true);
       expect(request.text.format.schema.additionalProperties).toBe(false);
       expect(request.max_output_tokens).toBe(2500);
+      expect(request.tools).toEqual([{ type: "web_search", search_context_size: "low" }]);
+      expect(request.tool_choice).toBe("auto");
       return new Response(
         JSON.stringify({
           output: [
-            { content: [{ type: "output_text", text: JSON.stringify(mealAnalysisV1Fixtures[0]) }] },
+            { type: "web_search_call", status: "completed" },
+            { content: [{
+              type: "output_text",
+              text: JSON.stringify(mealAnalysisV1Fixtures[0]),
+              annotations: [{
+                type: "url_citation",
+                title: "Manufacturer nutrition page",
+                url: "https://example.com/product",
+              }],
+            }] },
           ],
           usage: { input_tokens: 100, output_tokens: 200 },
         }),
@@ -74,6 +85,10 @@ describe("OpenAI meal analysis adapter", () => {
     });
     const result = await provider.analyze(Buffer.from("image"));
     expect(result.analysis.summary).toBe("Mixed salad");
+    expect(result.analysis.sources).toEqual([{
+      title: "Manufacturer nutrition page",
+      url: "https://example.com/product",
+    }]);
     expect(result.metadata).toEqual(
       expect.objectContaining({
         provider: "openai",
@@ -81,6 +96,8 @@ describe("OpenAI meal analysis adapter", () => {
         schemaVersion: "meal-photo-v1",
         inputTokens: 100,
         outputTokens: 200,
+        webSearchUsed: true,
+        sourceCount: 1,
       }),
     );
   });

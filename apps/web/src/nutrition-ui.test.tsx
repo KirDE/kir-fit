@@ -485,6 +485,10 @@ describe("nutrition mobile workflow", () => {
         }],
         assumptions: [],
         clarificationQuestions: [],
+        sources: [{
+          title: "Product source",
+          url: "https://example.com/product",
+        }],
       },
     };
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -509,6 +513,8 @@ describe("nutrition mobile workflow", () => {
 
     fireEvent.click(cardButton);
     const details = await screen.findByRole("dialog");
+    expect(within(details).getByRole("link", { name: "Product source" }).getAttribute("href"))
+      .toBe("https://example.com/product");
     const detailsPanel = details.firstElementChild!;
     expect(detailsPanel.lastElementChild?.classList.contains("nutrition-delete")).toBe(true);
     fireEvent.click(within(details).getByRole("button", { name: /^delete$/i }));

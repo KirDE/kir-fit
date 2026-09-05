@@ -67,10 +67,14 @@ describe("meal analysis normalization", () => {
         }],
         assumptions: [],
         clarificationQuestions: [],
+        sources: [{ title: "Knorr product page", url: "https://example.com/knorr" }],
       },
     });
 
     expect(normalized.title).toBe("Крем-суп из спаржи Knorr");
+    expect(normalized.sources).toEqual([
+      { title: "Knorr product page", url: "https://example.com/knorr" },
+    ]);
   });
 });
 
