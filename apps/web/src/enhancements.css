@@ -287,6 +287,19 @@
   background: var(--panel);
   color: var(--text);
 }
+.nutrition-date-current {
+  display: grid;
+  place-content: center;
+  gap: 2px;
+}
+.nutrition-date-current small {
+  color: var(--accent);
+  font-size: .72rem;
+}
+.nutrition-date-current:disabled {
+  cursor: default;
+  opacity: 1;
+}
 .nutrition-protein {
   display: flex;
   align-items: center;

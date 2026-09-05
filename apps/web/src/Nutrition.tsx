@@ -41,6 +41,10 @@ const copy = {
   en: {
     nutrition: "Nutrition",
     today: "Today",
+    yesterday: "Yesterday",
+    backToToday: "Back to today",
+    previousDay: "Previous day",
+    nextDay: "Next day",
     addFood: "Add food",
     protein: "Protein",
     calories: "Calories",
@@ -104,6 +108,10 @@ const copy = {
   de: {
     nutrition: "Ernährung",
     today: "Heute",
+    yesterday: "Gestern",
+    backToToday: "Zurück zu heute",
+    previousDay: "Vorheriger Tag",
+    nextDay: "Nächster Tag",
     addFood: "Essen hinzufügen",
     protein: "Protein",
     calories: "Kalorien",
@@ -167,6 +175,10 @@ const copy = {
   ru: {
     nutrition: "Питание",
     today: "Сегодня",
+    yesterday: "Вчера",
+    backToToday: "Вернуться к сегодня",
+    previousDay: "Предыдущий день",
+    nextDay: "Следующий день",
     addFood: "Добавить еду",
     protein: "Белок",
     calories: "Калории",
@@ -382,13 +394,23 @@ export function Nutrition() {
   const [uploadError, setUploadError] = useState("");
   const [editor, setEditor] = useState<NutritionEntry | PhotoAnalysisJob | "new">();
   const [deleteTarget, setDeleteTarget] = useState<NutritionEntry>();
+  const loadSequence = useRef(0);
   const load = (showLoading = true) => {
+    const sequence = ++loadSequence.current;
     if (showLoading) setLoading(true);
     setError("");
     return Promise.all([nutritionDay(date), photoAnalysisJobs().catch(() => [])])
-      .then(([nextDay, nextJobs]) => { setDay(nextDay); setJobs(nextJobs); })
-      .catch(() => setError(nt("loadFailed")))
-      .finally(() => showLoading && setLoading(false));
+      .then(([nextDay, nextJobs]) => {
+        if (sequence !== loadSequence.current) return;
+        setDay(nextDay);
+        setJobs(nextJobs);
+      })
+      .catch(() => {
+        if (sequence === loadSequence.current) setError(nt("loadFailed"));
+      })
+      .finally(() => {
+        if (showLoading && sequence === loadSequence.current) setLoading(false);
+      });
   };
   useEffect(() => { void load(); }, [date]);
   useEffect(() => {
@@ -429,9 +451,12 @@ export function Nutrition() {
         <div className="brandmark"><Utensils /></div>
       </header>
       <div className="nutrition-date-nav" aria-label={nt("nutrition")}>
-        <button aria-label="Previous day" onClick={() => setDate(moveLocalDate(date, -1))}><ChevronLeft /></button>
-        <button onClick={() => setDate(localDate())} disabled={date === localDate()}>{nt("today")}</button>
-        <button aria-label="Next day" onClick={() => setDate(moveLocalDate(date, 1))} disabled={date >= localDate()}><ChevronRight /></button>
+        <button aria-label={nt("previousDay")} onClick={() => setDate(moveLocalDate(date, -1))}><ChevronLeft /></button>
+        <button className="nutrition-date-current" onClick={() => setDate(localDate())} disabled={date === localDate()}>
+          <strong>{formatRelativeDay(date)}</strong>
+          {date !== localDate() && <small>{nt("backToToday")}</small>}
+        </button>
+        <button aria-label={nt("nextDay")} onClick={() => setDate(moveLocalDate(date, 1))} disabled={date >= localDate()}><ChevronRight /></button>
       </div>
       {loading ? <div className="nutrition-loading" aria-busy="true">…</div> : error ? (
         <div className="card error"><p>{error}</p><button onClick={() => load()}>{nt("retry")}</button></div>
@@ -579,6 +604,12 @@ function PrivateThumbnail({ src }: { src: string }) {
 function formatDay(date: string) {
   const [year, month, day] = date.split("-").map(Number);
   return new Date(year, month - 1, day).toLocaleDateString(getLanguage(), { weekday: "long", day: "numeric", month: "long" });
+}
+
+function formatRelativeDay(date: string) {
+  if (date === localDate()) return nt("today");
+  if (date === moveLocalDate(localDate(), -1)) return nt("yesterday");
+  return formatDay(date);
 }
 
 function MacroGrid({ nutrients }: { nutrients: Nutrients }) {
