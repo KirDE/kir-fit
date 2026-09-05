@@ -2,7 +2,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Nutrition, NutritionDashboardCard } from "./Nutrition";
-import { localDate } from "./nutrition";
+import { localDate, moveLocalDate } from "./nutrition";
 
 describe("nutrition mobile workflow", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -209,8 +209,12 @@ describe("nutrition mobile workflow", () => {
     const uploadResponse = new Promise<Response>((resolve) => { finishUpload = resolve; });
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/api/nutrition/photos/analyze") && init?.method === "POST")
+      if (url.endsWith("/api/nutrition/photos/analyze") && init?.method === "POST") {
+        expect((init.body as FormData).get("occurredOn")).toBe(
+          moveLocalDate(localDate(), -1),
+        );
         return uploadResponse;
+      }
       if (url.endsWith("/api/nutrition/photos"))
         return new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } });
       return new Response("{}", { status: 404 });
@@ -223,6 +227,8 @@ describe("nutrition mobile workflow", () => {
 
     const { container } = render(<Nutrition />);
     await screen.findByText("No food recorded for this day.");
+    fireEvent.click(within(container).getByRole("button", { name: "Previous day" }));
+    await within(container).findByText("No food recorded for this day.");
     fireEvent.click(within(container).getByRole("button", { name: /add food/i }));
     const input = container.querySelector('input[type="file"][capture="environment"]') as HTMLInputElement;
     fireEvent.change(input, {

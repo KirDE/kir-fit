@@ -132,7 +132,16 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
         );
       }
 
-      const manifest = await store.create(ownerId, idempotencyKey, request.file.buffer);
+      const occurredOn = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().parse(
+        request.body.occurredOn || undefined,
+      );
+      const manifest = await store.create(
+        ownerId,
+        idempotencyKey,
+        request.file.buffer,
+        undefined,
+        occurredOn,
+      );
       const queued = await store.update(manifest.analysisId, ownerId, {
         pendingTask: {
           kind: "analyze",
@@ -346,6 +355,7 @@ function publicManifest(manifest: {
   failureMessage?: string;
   retryable?: boolean;
   createdAt?: string;
+  occurredOn?: string;
   pendingTask?: unknown;
   finalizedAt?: string;
 }) {
@@ -353,6 +363,7 @@ function publicManifest(manifest: {
     analysisId: manifest.analysisId,
     status: manifest.status,
     createdAt: manifest.createdAt,
+    occurredOn: manifest.occurredOn,
     analysis: manifest.result,
     result: manifest.result,
     failureCode: manifest.failureCode,

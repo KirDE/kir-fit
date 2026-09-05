@@ -16,6 +16,7 @@ export type PrivatePhotoManifest = {
   ownerId: string;
   idempotencyHash: string;
   createdAt: string;
+  occurredOn?: string;
   expiresAt: string;
   sourceFormat: SupportedFoodImage;
   analysisFile: string | null;
@@ -172,6 +173,7 @@ export class PrivateFoodPhotoStore {
     idempotencyKey: string,
     input: Buffer,
     retentionMs = DEFAULT_PENDING_RETENTION_MS,
+    occurredOn?: string,
   ) {
     if (input.byteLength > MAX_FOOD_PHOTO_BYTES)
       throw new FoodImageError("file_too_large", "Photo exceeds the 10 MB limit", 413);
@@ -195,6 +197,7 @@ export class PrivateFoodPhotoStore {
       ownerId,
       idempotencyHash: hashIdempotency(ownerId, idempotencyKey),
       createdAt: createdAt.toISOString(),
+      occurredOn,
       expiresAt: new Date(createdAt.getTime() + retentionMs).toISOString(),
       sourceFormat,
       analysisFile,

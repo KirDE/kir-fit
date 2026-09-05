@@ -150,6 +150,7 @@ describe("nutrition calculations", () => {
       if (init?.body instanceof FormData) {
         expect(init.body.get("image")).toBeTruthy();
         expect(init.body.get("photo")).toBeNull();
+        expect(init.body.get("occurredOn")).toBe("2026-09-04");
         return new Response(
           JSON.stringify({
             analysisId: "7ed9bb35-40ab-4fe4-a78f-2cafb9d2381e",
@@ -170,6 +171,7 @@ describe("nutrition calculations", () => {
       new File([new Uint8Array([0xff, 0xd8, 0xff])], "meal.jpg", {
         type: "image/jpeg",
       }),
+      "2026-09-04",
     );
     await saveNutritionEntry({
       ...meal,

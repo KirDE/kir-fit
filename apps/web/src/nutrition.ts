@@ -162,11 +162,12 @@ async function analysisRequest(
   return result as PhotoAnalysisJob;
 }
 
-export const analyzeMeal = (file: File) => {
+export const analyzeMeal = (file: File, occurredOn: string) => {
   if (!file.type.startsWith("image/")) throw new Error("invalid-image");
   if (file.size > 10 * 1024 * 1024) throw new Error("image-too-large");
   const body = new FormData();
   body.set("image", file);
+  body.set("occurredOn", occurredOn);
   return analysisRequest(
     "/nutrition/photos/analyze",
     body,

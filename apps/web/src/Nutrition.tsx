@@ -235,6 +235,7 @@ const nt = (key: NutritionMessage) => copy[getLanguage()][key];
 type PendingPhotoUpload = {
   id: string;
   previewUrl: string;
+  occurredOn: string;
 };
 
 const emptyItem = (): NutritionItem => ({
@@ -317,7 +318,7 @@ export const normalizeMealAnalysis = (raw: MealAnalysis | any): MealAnalysis => 
 };
 
 const photoJobsForDate = (jobs: PhotoAnalysisJob[], date: string) =>
-  jobs.filter((job) => localDate(new Date(job.createdAt)) === date);
+  jobs.filter((job) => (job.occurredOn || localDate(new Date(job.createdAt))) === date);
 
 const nutritionTotalsWithPhotoJobs = (
   day: NutritionDay | undefined,
@@ -450,7 +451,7 @@ export function Nutrition() {
           <button className="primary nutrition-add" onClick={() => setEditor("new")}><Plus /> {nt("addFood")}</button>
           {uploadError && <p className="nutrition-alert error">{uploadError}</p>}
           <div className="nutrition-entries">
-            {pendingUploads.map((upload) => <PendingPhotoUploadCard key={upload.id} upload={upload} />)}
+            {pendingUploads.filter((upload) => upload.occurredOn === date).map((upload) => <PendingPhotoUploadCard key={upload.id} upload={upload} />)}
             {visibleJobs.map((job) => <PhotoAnalysisCard
               key={job.analysisId}
               job={job}
@@ -470,7 +471,7 @@ export function Nutrition() {
                 ))}
               </div>
             ))}
-            {!day.entries.length && !visibleJobs.length && !pendingUploads.length && <div className="nutrition-empty"><Utensils /><p>{nt("empty")}</p></div>}
+            {!day.entries.length && !visibleJobs.length && !pendingUploads.some((upload) => upload.occurredOn === date) && <div className="nutrition-empty"><Utensils /><p>{nt("empty")}</p></div>}
           </div>
         </>
       )}
@@ -480,12 +481,12 @@ export function Nutrition() {
         date={date}
         onClose={() => setEditor(undefined)}
         onUpload={(file) => {
-          const upload = { id: crypto.randomUUID(), previewUrl: URL.createObjectURL(file) };
+          const upload = { id: crypto.randomUUID(), previewUrl: URL.createObjectURL(file), occurredOn: date };
           setUploadError("");
           setPendingUploads((current) => [upload, ...current]);
           setEditor(undefined);
-          void analyzeMeal(file)
-            .then(() => load(false))
+          void analyzeMeal(file, date)
+            .then(() => photoAnalysisJobs().then(setJobs))
             .catch(() => setUploadError(nt("analysisFailed")))
             .finally(() => {
               URL.revokeObjectURL(upload.previewUrl);
