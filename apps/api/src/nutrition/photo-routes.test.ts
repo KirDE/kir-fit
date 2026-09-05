@@ -42,7 +42,7 @@ async function testServer(provider: MealAnalysisProvider) {
   return url;
 }
 
-async function photoForm() {
+async function photoForm(occurredOn?: string) {
   const bytes = await sharp({
     create: { width: 64, height: 48, channels: 3, background: "green" },
   })
@@ -50,6 +50,7 @@ async function photoForm() {
     .toBuffer();
   const form = new FormData();
   form.set("image", new Blob([bytes], { type: "application/octet-stream" }), "fake.exe");
+  if (occurredOn) form.set("occurredOn", occurredOn);
   return form;
 }
 
@@ -89,16 +90,17 @@ describe("private nutrition photo routes", () => {
     const first = await fetch(`${url}/api/nutrition/photos/analyze`, {
       method: "POST",
       headers,
-      body: await photoForm(),
+      body: await photoForm("2026-09-04"),
     });
     expect(first.status).toBe(202);
     const body: any = await first.json();
-    expect(body).toMatchObject({ status: "processing" });
+    expect(body).toMatchObject({ status: "processing", occurredOn: "2026-09-04" });
     const completed = await waitForJob(url, body.analysisId, {
       "x-test-owner": "owner-a",
     });
     expect(completed).toMatchObject({
       status: "completed",
+      occurredOn: "2026-09-04",
       analysis: { summary: "Mixed salad" },
     });
 

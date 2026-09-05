@@ -60,6 +60,7 @@ export type PhotoAnalysisJob = {
   analysisId: string;
   status: "processing" | "completed" | "manual_required";
   createdAt: string;
+  occurredOn?: string;
   analysis?: unknown;
   result?: unknown;
   failureCode?: string;
