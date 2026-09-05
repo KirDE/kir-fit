@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Nutrition, NutritionDashboardCard } from "./Nutrition";
 import { localDate, moveLocalDate } from "./nutrition";
 
 describe("nutrition mobile workflow", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
 
   beforeEach(() => {
     localStorage.clear();
@@ -287,5 +290,123 @@ describe("nutrition mobile workflow", () => {
     fireEvent.click(open);
     await screen.findByRole("heading", { name: /review meal/i });
     expect(screen.queryByText("Another detail?")).toBeNull();
+  });
+
+  it("labels the selected day and keeps meals separated while navigating", async () => {
+    const today = localDate();
+    const yesterday = moveLocalDate(today, -1);
+    localStorage.setItem(
+      "kirfit_guest_nutrition_v1",
+      JSON.stringify({
+        profile: {
+          heightCm: 180,
+          goalWeightKg: null,
+          proteinTargetMode: "manual",
+          manualProteinTargetGrams: 100,
+        },
+        entries: [
+          {
+            id: "today-meal",
+            occurredAt: `${today}T12:00:00`,
+            mealType: "lunch",
+            title: "Today meal",
+            consumedPercent: 100,
+            calories: 300,
+            proteinGrams: 30,
+            fatGrams: 10,
+            carbsGrams: 20,
+            fiberGrams: 3,
+            items: [],
+          },
+          {
+            id: "yesterday-meal",
+            occurredAt: `${yesterday}T12:00:00`,
+            mealType: "lunch",
+            title: "Yesterday meal",
+            consumedPercent: 100,
+            calories: 200,
+            proteinGrams: 20,
+            fatGrams: 8,
+            carbsGrams: 15,
+            fiberGrams: 2,
+            items: [],
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } }),
+    ));
+
+    const { container } = render(<Nutrition />);
+    await within(container).findByText("Today meal");
+    expect(within(container).getByText("Today")).toBeTruthy();
+
+    fireEvent.click(within(container).getByRole("button", { name: "Previous day" }));
+    await within(container).findByText("Yesterday meal");
+    expect(within(container).queryByText("Today meal")).toBeNull();
+    expect(within(container).getByText("Yesterday")).toBeTruthy();
+    expect(within(container).getByText("20 / 100 g")).toBeTruthy();
+
+    fireEvent.click(within(container).getByRole("button", { name: /yesterday.*back to today/i }));
+    await within(container).findByText("Today meal");
+    expect(within(container).queryByText("Yesterday meal")).toBeNull();
+    expect(within(container).getByText("30 / 100 g")).toBeTruthy();
+  });
+
+  it("ignores a late response from a previously selected day", async () => {
+    localStorage.removeItem("kirfit_guest");
+    localStorage.setItem("kirfit_token", "test-token");
+    const today = localDate();
+    const yesterday = moveLocalDate(today, -1);
+    let resolveToday!: (response: Response) => void;
+    const delayedToday = new Promise<Response>((resolve) => { resolveToday = resolve; });
+    const day = (date: string, title: string) => ({
+      date,
+      proteinTarget: 100,
+      totals: { calories: 250, proteinGrams: 25, fatGrams: 8, carbsGrams: 20, fiberGrams: 2 },
+      entries: [{
+        id: `${date}-meal`,
+        occurredAt: `${date}T12:00:00Z`,
+        mealType: "lunch",
+        title,
+        consumedPercent: 100,
+        calories: 250,
+        proteinGrams: 25,
+        fatGrams: 8,
+        carbsGrams: 20,
+        fiberGrams: 2,
+        items: [],
+      }],
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes(`/api/nutrition/days/${today}`)) return delayedToday;
+      if (url.includes(`/api/nutrition/days/${yesterday}`)) {
+        return new Response(JSON.stringify(day(yesterday, "Selected yesterday")), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.endsWith("/api/nutrition/photos")) {
+        return new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return new Response("{}", { status: 404 });
+    }));
+
+    const { container } = render(<Nutrition />);
+    fireEvent.click(within(container).getByRole("button", { name: "Previous day" }));
+    await within(container).findByText("Selected yesterday");
+
+    await act(async () => {
+      resolveToday(new Response(JSON.stringify(day(today, "Late today")), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+      await delayedToday;
+    });
+    expect(within(container).getByText("Selected yesterday")).toBeTruthy();
+    expect(within(container).queryByText("Late today")).toBeNull();
+    expect(within(container).getByText("Yesterday")).toBeTruthy();
   });
 });
