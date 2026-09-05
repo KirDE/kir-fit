@@ -54,6 +54,7 @@ export type MealAnalysis = {
   clarificationRound: number;
   thumbnailUrl?: string;
   providerResult?: unknown;
+  sources?: Array<{ title: string; url: string }>;
 };
 
 export type PhotoAnalysisJob = {
