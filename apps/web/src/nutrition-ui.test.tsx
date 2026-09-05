@@ -409,4 +409,115 @@ describe("nutrition mobile workflow", () => {
     expect(within(container).queryByText("Late today")).toBeNull();
     expect(within(container).getByText("Yesterday")).toBeTruthy();
   });
+
+  it("rounds combined journal and photo nutrients for display", async () => {
+    localStorage.setItem(
+      "kirfit_guest_nutrition_v1",
+      JSON.stringify({
+        profile: {
+          heightCm: 180,
+          goalWeightKg: null,
+          proteinTargetMode: "manual",
+          manualProteinTargetGrams: 100,
+        },
+        entries: [{
+          id: "decimal-meal",
+          occurredAt: `${localDate()}T12:00:00`,
+          mealType: "lunch",
+          title: "Decimal meal",
+          consumedPercent: 100,
+          calories: 100,
+          proteinGrams: 0.2,
+          fatGrams: 0.2,
+          carbsGrams: 0.2,
+          fiberGrams: 0.2,
+          items: [],
+        }],
+      }),
+    );
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify([{
+      analysisId: "decimal-analysis",
+      status: "completed",
+      occurredOn: localDate(),
+      createdAt: new Date().toISOString(),
+      result: {
+        summary: "Decimal estimate",
+        foods: [{
+          name: "Small serving",
+          portion: { estimatedGrams: 1 },
+          calories: { estimate: 1 },
+          proteinGrams: { estimate: 0.1 },
+          fatGrams: { estimate: 0.1 },
+          carbsGrams: { estimate: 0.1 },
+          fiberGrams: { estimate: 0.1 },
+        }],
+        assumptions: [],
+        clarificationQuestions: [],
+      },
+    }]), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    render(<Nutrition />);
+    await screen.findByText("Decimal estimate");
+    for (const label of ["Fat, g", "Carbs, g", "Fiber, g"]) {
+      expect(screen.getByText(label).closest("span")?.querySelector("b")?.textContent).toBe("0.3");
+    }
+    expect(screen.getByText("0.3 / 100 g")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("0.30000000000000004");
+  });
+
+  it("deletes a photo analysis only from details after confirmation", async () => {
+    let deleted = false;
+    const job = {
+      analysisId: "analysis-safe-delete",
+      status: "completed",
+      occurredOn: localDate(),
+      createdAt: new Date().toISOString(),
+      result: {
+        summary: "Meal to delete",
+        foods: [{
+          name: "Food",
+          portion: { estimatedGrams: 100 },
+          calories: { estimate: 200 },
+          proteinGrams: { estimate: 20 },
+          fatGrams: { estimate: 8 },
+          carbsGrams: { estimate: 15 },
+          fiberGrams: { estimate: 2 },
+        }],
+        assumptions: [],
+        clarificationQuestions: [],
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/nutrition/photos") && !init?.method) {
+        return new Response(JSON.stringify(deleted ? [] : [job]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.endsWith(`/api/nutrition/photos/${job.analysisId}`) && init?.method === "DELETE") {
+        deleted = true;
+        return new Response(null, { status: 204 });
+      }
+      return new Response("{}", { status: 404 });
+    }));
+
+    render(<Nutrition />);
+    const cardButton = await screen.findByRole("button", { name: /meal to delete.*review estimate/i });
+    expect(screen.queryByLabelText("Delete pending photo")).toBeNull();
+    expect(deleted).toBe(false);
+
+    fireEvent.click(cardButton);
+    const details = await screen.findByRole("dialog");
+    const detailsPanel = details.firstElementChild!;
+    expect(detailsPanel.lastElementChild?.classList.contains("nutrition-delete")).toBe(true);
+    fireEvent.click(within(details).getByRole("button", { name: /^delete$/i }));
+    const confirmation = await screen.findByRole("alertdialog");
+    expect(within(confirmation).getByText("Delete this photo analysis?")).toBeTruthy();
+    expect(deleted).toBe(false);
+
+    fireEvent.click(within(confirmation).getByRole("button", { name: /^delete$/i }));
+    await waitFor(() => expect(deleted).toBe(true));
+    await waitFor(() => expect(screen.queryByText("Meal to delete")).toBeNull());
+  });
 });

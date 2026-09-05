@@ -25,6 +25,7 @@ import {
   moveLocalDate,
   nutritionDay,
   photoAnalysisJobs,
+  roundNutrient,
   saveNutritionEntry,
   sumItems,
 } from "./nutrition";
@@ -98,6 +99,9 @@ const copy = {
     delete: "Delete",
     deleteTitle: "Delete this meal?",
     deleteText: "Daily totals will update immediately. This cannot be undone.",
+    deletePhotoTitle: "Delete this photo analysis?",
+    deletePhotoText: "The estimate and private photo will be deleted. This cannot be undone.",
+    deleteFailed: "Could not delete this item. Try again.",
     cancel: "Cancel",
     saveFailed: "Could not save the meal. Your changes remain on this screen.",
     loadFailed: "Could not load nutrition data.",
@@ -165,6 +169,9 @@ const copy = {
     delete: "Löschen",
     deleteTitle: "Diese Mahlzeit löschen?",
     deleteText: "Die Tagessumme wird sofort aktualisiert. Dies kann nicht rückgängig gemacht werden.",
+    deletePhotoTitle: "Diese Fotoanalyse löschen?",
+    deletePhotoText: "Die Schätzung und das private Foto werden gelöscht. Dies kann nicht rückgängig gemacht werden.",
+    deleteFailed: "Dieser Eintrag konnte nicht gelöscht werden. Versuche es erneut.",
     cancel: "Abbrechen",
     saveFailed: "Die Mahlzeit konnte nicht gespeichert werden. Deine Änderungen bleiben erhalten.",
     loadFailed: "Ernährungsdaten konnten nicht geladen werden.",
@@ -232,6 +239,9 @@ const copy = {
     delete: "Удалить",
     deleteTitle: "Удалить приём пищи?",
     deleteText: "Итоги дня обновятся сразу. Действие нельзя отменить.",
+    deletePhotoTitle: "Удалить анализ фотографии?",
+    deletePhotoText: "Оценка и приватная фотография будут удалены. Действие нельзя отменить.",
+    deleteFailed: "Не удалось удалить. Попробуйте ещё раз.",
     cancel: "Отмена",
     saveFailed: "Не удалось сохранить еду. Изменения остались на экране.",
     loadFailed: "Не удалось загрузить данные питания.",
@@ -371,7 +381,7 @@ export function NutritionDashboardCard({ open }: { open: () => void }) {
     <button className="nutrition-dashboard-card" onClick={open}>
       <span>{nt("protein")}</span>
       <strong>
-        {totals.proteinGrams} / {day.proteinTarget || "—"} {nt("gramShort")}
+        {roundNutrient(totals.proteinGrams, "proteinGrams")} / {day.proteinTarget || "—"} {nt("gramShort")}
       </strong>
       <i><b style={{ width: `${Math.min(100, percent)}%` }} /></i>
       <small>
@@ -393,7 +403,7 @@ export function Nutrition() {
   const [error, setError] = useState("");
   const [uploadError, setUploadError] = useState("");
   const [editor, setEditor] = useState<NutritionEntry | PhotoAnalysisJob | "new">();
-  const [deleteTarget, setDeleteTarget] = useState<NutritionEntry>();
+  const [deleteTarget, setDeleteTarget] = useState<NutritionEntry | PhotoAnalysisJob>();
   const loadSequence = useRef(0);
   const load = (showLoading = true) => {
     const sequence = ++loadSequence.current;
@@ -467,7 +477,7 @@ export function Nutrition() {
               <span><strong>{percent}%</strong><small>{nt("protein")}</small></span>
             </div>
             <div>
-              <strong>{displayedTotals.proteinGrams} / {day.proteinTarget || "—"} {nt("gramShort")}</strong>
+              <strong>{roundNutrient(displayedTotals.proteinGrams, "proteinGrams")} / {day.proteinTarget || "—"} {nt("gramShort")}</strong>
               <span>{day.proteinTarget ? `${Math.abs(difference)} ${nt("gramShort")} ${difference >= 0 ? nt("remaining") : nt("excess")}` : nt("noTarget")}</span>
               {percent >= 100 && <em>{percent > 100 ? nt("targetExceeded") : nt("targetReached")}</em>}
             </div>
@@ -481,7 +491,6 @@ export function Nutrition() {
               key={job.analysisId}
               job={job}
               onOpen={() => setEditor(job)}
-              onDelete={async () => { await deletePhotoAnalysis(job.analysisId); load(); }}
             />)}
             {grouped.map((group) => (
               <div key={group.type} className="nutrition-meal-group">
@@ -490,8 +499,8 @@ export function Nutrition() {
                   <button className="nutrition-entry" key={entry.id} onClick={() => setEditor(entry)}>
                     {entry.thumbnailUrl ? <PrivateThumbnail src={entry.thumbnailUrl} /> : <span className="nutrition-entry-icon"><Utensils /></span>}
                     <span><b>{entry.title}</b><small>{new Date(entry.occurredAt).toLocaleTimeString(getLanguage(), { hour: "2-digit", minute: "2-digit" })} · {entry.consumedPercent}%</small></span>
-                    <strong>{entry.proteinGrams} {nt("gramShort")}</strong>
-                    <small>{entry.calories} kcal</small>
+                    <strong>{roundNutrient(entry.proteinGrams, "proteinGrams")} {nt("gramShort")}</strong>
+                    <small>{roundNutrient(entry.calories, "calories")} kcal</small>
                   </button>
                 ))}
               </div>
@@ -520,9 +529,9 @@ export function Nutrition() {
         }}
         onQueued={() => { setEditor(undefined); load(false); }}
         onSaved={() => { setEditor(undefined); load(); }}
-        onDelete={editor !== "new" && "id" in editor ? () => setDeleteTarget(editor) : undefined}
+        onDelete={editor !== "new" ? () => setDeleteTarget(editor) : undefined}
       />}
-      {deleteTarget && <ConfirmDelete entry={deleteTarget} onCancel={() => setDeleteTarget(undefined)} onDeleted={() => { setDeleteTarget(undefined); setEditor(undefined); load(); }} />}
+      {deleteTarget && <ConfirmDelete target={deleteTarget} onCancel={() => setDeleteTarget(undefined)} onDeleted={() => { setDeleteTarget(undefined); setEditor(undefined); load(); }} />}
     </section>
   );
 }
@@ -537,10 +546,9 @@ function PendingPhotoUploadCard({ upload }: { upload: PendingPhotoUpload }) {
   </div>;
 }
 
-function PhotoAnalysisCard({ job, onOpen, onDelete }: {
+function PhotoAnalysisCard({ job, onOpen }: {
   job: PhotoAnalysisJob;
   onOpen: () => void;
-  onDelete: () => void;
 }) {
   const normalized = job.result || job.analysis
     ? normalizeMealAnalysis(job)
@@ -565,7 +573,6 @@ function PhotoAnalysisCard({ job, onOpen, onDelete }: {
       </span>
       {job.status === "processing" ? <RefreshCw className="nutrition-spin" /> : <ChevronRight />}
     </button>
-    <button className="nutrition-analysis-delete" aria-label={nt("cancelAnalysis")} onClick={onDelete}><X /></button>
   </div>;
 }
 
@@ -614,10 +621,10 @@ function formatRelativeDay(date: string) {
 
 function MacroGrid({ nutrients }: { nutrients: Nutrients }) {
   return <div className="nutrition-macros">
-    <span><b>{Math.round(nutrients.calories)}</b><small>kcal</small></span>
-    <span><b>{nutrients.fatGrams}</b><small>{nt("fat")}, {nt("gramShort")}</small></span>
-    <span><b>{nutrients.carbsGrams}</b><small>{nt("carbs")}, {nt("gramShort")}</small></span>
-    <span><b>{nutrients.fiberGrams}</b><small>{nt("fiber")}, {nt("gramShort")}</small></span>
+    <span><b>{roundNutrient(nutrients.calories, "calories")}</b><small>kcal</small></span>
+    <span><b>{roundNutrient(nutrients.fatGrams, "fatGrams")}</b><small>{nt("fat")}, {nt("gramShort")}</small></span>
+    <span><b>{roundNutrient(nutrients.carbsGrams, "carbsGrams")}</b><small>{nt("carbs")}, {nt("gramShort")}</small></span>
+    <span><b>{roundNutrient(nutrients.fiberGrams, "fiberGrams")}</b><small>{nt("fiber")}, {nt("gramShort")}</small></span>
   </div>;
 }
 
@@ -703,8 +710,8 @@ function MealEditor({ value, job, date, onClose, onUpload, onQueued, onSaved, on
           try { await saveNutritionEntry({ id: value?.id, occurredAt, mealType, title: title.trim(), consumedPercent, items, ...full, thumbnailUrl: analysis?.thumbnailUrl || value?.thumbnailUrl, assumptions: analysis?.assumptions || value?.assumptions, uncertainty: analysis?.uncertainty || value?.uncertainty, originalAnalysis: value?.originalAnalysis || analysis }); if (!token() && analysis) await deletePhotoAnalysis(analysis.id).catch(() => undefined); onSaved(); }
           catch { setError(nt("saveFailed")); setSaving(false); }
         }}>{nt("save")}</button>
-        {onDelete && <button className="nutrition-delete" onClick={onDelete}><Trash2 /> {nt("delete")}</button>}
       </div>}
+      {onDelete && <button className="nutrition-delete" onClick={onDelete}><Trash2 /> {nt("delete")}</button>}
     </div>
   </div>;
 }
@@ -722,7 +729,14 @@ function ConsumedControl({ value, onChange }: { value: number; onChange: (value:
   return <fieldset className="nutrition-consumed"><legend>{nt("consumed")}</legend><output htmlFor="consumed-range">{value}{nt("percent")}</output><input id="consumed-range" type="range" min="0" max="100" step="1" value={value} onChange={event => onChange(Number(event.target.value))} aria-valuetext={`${value} ${nt("percent")}`} /><div>{[25,50,75,100].map(percent => <button type="button" className={value === percent ? "active" : ""} key={percent} onClick={() => onChange(percent)}>{percent}%</button>)}</div></fieldset>;
 }
 
-function ConfirmDelete({ entry, onCancel, onDeleted }: { entry: NutritionEntry; onCancel: () => void; onDeleted: () => void }) {
+function ConfirmDelete({ target, onCancel, onDeleted }: { target: NutritionEntry | PhotoAnalysisJob; onCancel: () => void; onDeleted: () => void }) {
   const [busy, setBusy] = useState(false);
-  return <div className="nutrition-modal confirm" role="alertdialog" aria-modal="true"><div className="nutrition-modal-panel"><h2>{nt("deleteTitle")}</h2><p>{entry.title}</p><p>{nt("deleteText")}</p><div className="nutrition-confirm-actions"><button onClick={onCancel}>{nt("cancel")}</button><button className="danger-button" disabled={busy} onClick={async () => { setBusy(true); await deleteNutritionEntry(entry.id); onDeleted(); }}>{nt("delete")}</button></div></div></div>;
+  const [error, setError] = useState("");
+  const isPhoto = "analysisId" in target;
+  const title = isPhoto && (target.result || target.analysis)
+    ? normalizeMealAnalysis(target).title
+    : isPhoto
+      ? nt("processing")
+      : target.title;
+  return <div className="nutrition-modal confirm" role="alertdialog" aria-modal="true"><div className="nutrition-modal-panel"><h2>{nt(isPhoto ? "deletePhotoTitle" : "deleteTitle")}</h2><p>{title}</p><p>{nt(isPhoto ? "deletePhotoText" : "deleteText")}</p>{error && <p className="nutrition-alert error">{error}</p>}<div className="nutrition-confirm-actions"><button onClick={onCancel}>{nt("cancel")}</button><button className="danger-button" disabled={busy} onClick={async () => { setBusy(true); setError(""); try { if (isPhoto) await deletePhotoAnalysis(target.analysisId); else await deleteNutritionEntry(target.id); onDeleted(); } catch { setError(nt("deleteFailed")); setBusy(false); } }}>{nt("delete")}</button></div></div></div>;
 }
