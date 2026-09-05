@@ -59,14 +59,14 @@ async function waitForJob(
   analysisId: string,
   headers: Record<string, string>,
 ) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
     const response = await fetch(
       `${url}/api/nutrition/photos/${analysisId}/status`,
       { headers },
     );
     const body: any = await response.json();
     if (body.status !== "processing") return body;
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error("analysis job did not finish");
 }
