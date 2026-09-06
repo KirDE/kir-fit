@@ -17,7 +17,6 @@ import { token } from "./api";
 import {
   analyzeMeal,
   analysisHeaders,
-  clarifyMeal,
   deletePhotoAnalysis,
   deleteNutritionEntry,
   emptyNutrients,
@@ -64,12 +63,13 @@ const copy = {
     analyzing: "Estimating food and portions…",
     queued: "Photo added. Analysis continues in the background.",
     processing: "Analysis in progress",
+    ready: "Ready",
     answerQuestions: "Answer questions",
     reviewEstimate: "Review estimate",
     analysisFailedShort: "Analysis failed — enter manually",
     queuedHint: "You can close Fit and return later.",
     cancelAnalysis: "Delete pending photo",
-    estimated: "Estimated from a photo — review before saving.",
+    estimated: "Recognized from the photo.",
     privatePhoto: "Your photo is processed privately and is not published.",
     analysisFailed: "Photo analysis is unavailable. You can enter the meal manually.",
     offlinePhoto: "Photo analysis needs an internet connection. Manual entry still works.",
@@ -81,6 +81,8 @@ const copy = {
     continue: "Update estimate",
     editDirectly: "Edit manually",
     review: "Review meal",
+    details: "Meal details",
+    saveChanges: "Save changes",
     mealName: "Meal name",
     foodName: "Food",
     grams: "Estimated grams",
@@ -135,12 +137,13 @@ const copy = {
     analyzing: "Lebensmittel und Portionen werden geschätzt…",
     queued: "Foto hinzugefügt. Die Analyse läuft im Hintergrund weiter.",
     processing: "Analyse läuft",
+    ready: "Fertig",
     answerQuestions: "Fragen beantworten",
     reviewEstimate: "Schätzung prüfen",
     analysisFailedShort: "Analyse fehlgeschlagen — manuell eingeben",
     queuedHint: "Du kannst Fit schließen und später zurückkehren.",
     cancelAnalysis: "Ausstehendes Foto löschen",
-    estimated: "Vom Foto geschätzt — vor dem Speichern prüfen.",
+    estimated: "Aus dem Foto erkannt.",
     privatePhoto: "Das Foto wird privat verarbeitet und nicht veröffentlicht.",
     analysisFailed: "Die Fotoanalyse ist nicht verfügbar. Du kannst das Essen manuell eingeben.",
     offlinePhoto: "Die Fotoanalyse benötigt Internet. Manuelle Eingabe funktioniert weiterhin.",
@@ -152,6 +155,8 @@ const copy = {
     continue: "Schätzung aktualisieren",
     editDirectly: "Manuell bearbeiten",
     review: "Mahlzeit prüfen",
+    details: "Details der Mahlzeit",
+    saveChanges: "Änderungen speichern",
     mealName: "Name der Mahlzeit",
     foodName: "Lebensmittel",
     grams: "Geschätzte Gramm",
@@ -206,12 +211,13 @@ const copy = {
     analyzing: "Оцениваю состав и размер порций…",
     queued: "Фото добавлено. Анализ продолжается в фоне.",
     processing: "Идёт анализ",
+    ready: "Готово",
     answerQuestions: "Ответить на вопросы",
     reviewEstimate: "Проверить оценку",
     analysisFailedShort: "Не удалось распознать — ввести вручную",
     queuedHint: "Fit можно закрыть и вернуться позже.",
     cancelAnalysis: "Удалить необработанное фото",
-    estimated: "Оценка по фотографии — проверьте перед сохранением.",
+    estimated: "Распознано по фотографии.",
     privatePhoto: "Фото обрабатывается приватно и нигде не публикуется.",
     analysisFailed: "Анализ фото недоступен. Можно ввести блюдо вручную.",
     offlinePhoto: "Для анализа фото нужен интернет. Ручной ввод продолжает работать.",
@@ -223,6 +229,8 @@ const copy = {
     continue: "Обновить оценку",
     editDirectly: "Исправить вручную",
     review: "Проверка блюда",
+    details: "Детали блюда",
+    saveChanges: "Сохранить изменения",
     mealName: "Название блюда",
     foodName: "Продукт",
     grams: "Примерный вес, г",
@@ -538,7 +546,6 @@ export function Nutrition() {
               setPendingUploads((current) => current.filter((item) => item.id !== upload.id));
             });
         }}
-        onQueued={() => { setEditor(undefined); load(false); }}
         onSaved={() => { setEditor(undefined); load(); }}
         onDelete={editor !== "new" ? () => setDeleteTarget(editor) : undefined}
       />}
@@ -567,11 +574,9 @@ function PhotoAnalysisCard({ job, onOpen }: {
   const totals = normalized ? sumItems(normalized.items) : undefined;
   const label = job.status === "processing"
     ? nt("processing")
-    : normalized?.questions.length && normalized.clarificationRound < 1
-        ? nt("answerQuestions")
-        : normalized
-          ? nt("reviewEstimate")
-          : nt("analysisFailedShort");
+    : normalized
+      ? nt("ready")
+      : nt("analysisFailedShort");
   return <div className={`nutrition-entry nutrition-analysis-card ${job.status}`}>
     <button className="nutrition-analysis-open" onClick={onOpen}>
       {job.thumbnailUrl
@@ -639,13 +644,12 @@ function MacroGrid({ nutrients }: { nutrients: Nutrients }) {
   </div>;
 }
 
-function MealEditor({ value, job, date, onClose, onUpload, onQueued, onSaved, onDelete }: {
+function MealEditor({ value, job, date, onClose, onUpload, onSaved, onDelete }: {
   value?: NutritionEntry;
   job?: PhotoAnalysisJob;
   date: string;
   onClose: () => void;
   onUpload: (file: File) => void;
-  onQueued: () => void;
   onSaved: () => void;
   onDelete?: () => void;
 }) {
@@ -656,22 +660,21 @@ function MealEditor({ value, job, date, onClose, onUpload, onQueued, onSaved, on
     ? "review"
     : job?.status === "processing"
       ? "loading"
-      : initialAnalysis?.questions.length && initialAnalysis.clarificationRound < 1
-        ? "questions"
-        : job
-          ? "review"
-          : "choose";
-  const [stage, setStage] = useState<"choose" | "loading" | "questions" | "review">(initialStage);
-  const [analysis, setAnalysis] = useState<MealAnalysis | undefined>(initialAnalysis);
-  const [items, setItems] = useState<NutritionItem[]>(value?.items?.length
+      : job
+        ? "review"
+        : "choose";
+  const [stage, setStage] = useState<"choose" | "loading" | "review">(initialStage);
+  const analysis = initialAnalysis;
+  const initialItems = value?.items?.length
     ? structuredClone(value.items)
     : initialAnalysis?.items?.length
       ? structuredClone(initialAnalysis.items)
-      : [emptyItem()]);
+      : [emptyItem()];
+  const [items, setItems] = useState<NutritionItem[]>(initialItems);
+  const baseItems = useRef(initialItems);
   const [title, setTitle] = useState(value?.title || initialAnalysis?.title || "");
   const [mealType, setMealType] = useState<NutritionEntry["mealType"]>(value?.mealType || "snack");
   const [consumedPercent, setConsumedPercent] = useState(value?.consumedPercent ?? 100);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
   const [error, setError] = useState(job?.status === "manual_required" && !initialAnalysis ? nt("analysisFailed") : "");
   const [saving, setSaving] = useState(false);
   const galleryRef = useRef<HTMLInputElement>(null);
@@ -684,12 +687,13 @@ function MealEditor({ value, job, date, onClose, onUpload, onQueued, onSaved, on
     onUpload(file);
   };
   const full = sumItems(items);
+  const photoResult = Boolean((job && initialAnalysis) || value?.thumbnailUrl);
   const occurredAt =
     value?.occurredAt ||
     new Date(`${date}T${new Date().toTimeString().slice(0, 8)}`).toISOString();
   return <div className="nutrition-modal" role="dialog" aria-modal="true" aria-labelledby="meal-editor-title">
     <div className="nutrition-modal-panel">
-      <div className="nutrition-modal-title"><h2 id="meal-editor-title">{stage === "review" ? nt("review") : nt("addFood")}</h2><button aria-label={nt("cancel")} onClick={onClose}><X /></button></div>
+      <div className="nutrition-modal-title"><h2 id="meal-editor-title">{stage === "review" ? nt(photoResult ? "details" : "review") : nt("addFood")}</h2><button aria-label={nt("cancel")} onClick={onClose}><X /></button></div>
       {error && <p className="nutrition-alert error">{error}</p>}
       {stage === "choose" && <div className="nutrition-chooser">
         <input ref={cameraRef} hidden type="file" accept="image/*" capture="environment" onChange={(event) => void chooseFile(event.target.files?.[0])} />
@@ -700,40 +704,93 @@ function MealEditor({ value, job, date, onClose, onUpload, onQueued, onSaved, on
         <p>{nt("privatePhoto")}</p>
       </div>}
       {stage === "loading" && <div className="nutrition-analyzing" aria-live="polite"><i /><p>{nt("processing")}</p><small>{nt("queuedHint")}</small></div>}
-      {stage === "questions" && analysis && <><div className="nutrition-estimate"><b>{nt("estimated")}</b><MacroGrid nutrients={sumItems(analysis.items)} /></div><Clarifications analysis={analysis} answers={answers} setAnswers={setAnswers} onManual={() => setStage("review")} onContinue={async () => {
-        if (analysis.clarificationRound >= 1) { setStage("review"); return; }
-        setError("");
-        try { await clarifyMeal(analysis, answers); onQueued(); }
-        catch { setError(nt("analysisFailed")); }
-      }} /></>}
       {stage === "review" && <div className="nutrition-review">
         {analysis && <div className="nutrition-estimate"><b>{nt("estimated")}</b>{analysis.uncertainty && <p><strong>{nt("uncertainty")}:</strong> {analysis.uncertainty}</p>}{analysis.assumptions.length > 0 && <details><summary>{nt("assumptions")}</summary><ul>{analysis.assumptions.map((item, index) => <li key={index}>{item}</li>)}</ul></details>}{analysis.sources && analysis.sources.length > 0 && <details><summary>{nt("sources")}</summary><ul>{analysis.sources.map((source) => <li key={source.url}><a href={source.url} target="_blank" rel="noreferrer">{source.title}</a></li>)}</ul></details>}</div>}
-        <label>{nt("mealName")}<input value={title} maxLength={120} onChange={(event) => setTitle(event.target.value)} /></label>
-        <label>{nt("manual")}<select value={mealType} onChange={(event) => setMealType(event.target.value as NutritionEntry["mealType"])}>{(["breakfast", "lunch", "dinner", "snack"] as const).map(type => <option key={type} value={type}>{nt(type)}</option>)}</select></label>
+        {photoResult ? <h3 className="nutrition-photo-title">{title}</h3> : <>
+          <label>{nt("mealName")}<input value={title} maxLength={120} onChange={(event) => setTitle(event.target.value)} /></label>
+          <label>{nt("manual")}<select value={mealType} onChange={(event) => setMealType(event.target.value as NutritionEntry["mealType"])}>{(["breakfast", "lunch", "dinner", "snack"] as const).map(type => <option key={type} value={type}>{nt(type)}</option>)}</select></label>
+        </>}
         <p className="nutrition-full-serving">{nt("fullServing")}</p>
-        {items.map((item, index) => <NutritionItemEditor key={item.id || index} item={item} onChange={(next) => setItems(current => current.map((old, i) => i === index ? next : old))} onRemove={items.length > 1 ? () => setItems(current => current.filter((_, i) => i !== index)) : undefined} />)}
-        <button className="nutrition-add-item" onClick={() => setItems(current => [...current, emptyItem()])}><Plus />{nt("addItem")}</button>
+        {items.map((item, index) => photoResult
+          ? <PhotoNutritionItemEditor key={item.id || index} item={item} onWeightChange={(weight) => setItems(current => current.map((old, i) => i === index ? scaleItemToWeight(baseItems.current[index], weight) : old))} />
+          : <NutritionItemEditor key={item.id || index} item={item} onChange={(next) => setItems(current => current.map((old, i) => i === index ? next : old))} onRemove={items.length > 1 ? () => setItems(current => current.filter((_, i) => i !== index)) : undefined} />)}
+        {!photoResult && <button className="nutrition-add-item" onClick={() => setItems(current => [...current, emptyItem()])}><Plus />{nt("addItem")}</button>}
         <MacroGrid nutrients={full} />
-        <ConsumedControl value={consumedPercent} onChange={setConsumedPercent} />
-        {consumedPercent === 0 && <p className="nutrition-alert">{nt("discardZero")}</p>}
+        {!photoResult && <ConsumedControl value={consumedPercent} onChange={setConsumedPercent} />}
+        {!photoResult && consumedPercent === 0 && <p className="nutrition-alert">{nt("discardZero")}</p>}
         <button className="primary nutrition-save" disabled={saving || consumedPercent === 0 || !title.trim() || items.some(item => !item.name.trim())} onClick={async () => {
           setSaving(true); setError("");
           try { await saveNutritionEntry({ id: value?.id, occurredAt, mealType, title: title.trim(), consumedPercent, items, ...full, thumbnailUrl: analysis?.thumbnailUrl || value?.thumbnailUrl, assumptions: analysis?.assumptions || value?.assumptions, uncertainty: analysis?.uncertainty || value?.uncertainty, originalAnalysis: value?.originalAnalysis || analysis }); if (!token() && analysis) await deletePhotoAnalysis(analysis.id).catch(() => undefined); onSaved(); }
           catch { setError(nt("saveFailed")); setSaving(false); }
-        }}>{nt("save")}</button>
+        }}>{nt(photoResult ? "saveChanges" : "save")}</button>
       </div>}
       {onDelete && <button className="nutrition-delete" onClick={onDelete}><Trash2 /> {nt("delete")}</button>}
     </div>
   </div>;
 }
 
-function Clarifications({ analysis, answers, setAnswers, onContinue, onManual }: { analysis: MealAnalysis; answers: Record<string, string>; setAnswers: (answers: Record<string, string>) => void; onContinue: () => void; onManual: () => void }) {
-  return <div className="nutrition-questions"><p>{nt("questions")}</p>{analysis.questions.map(question => <fieldset key={question.id}><legend>{question.text}</legend>{question.choices.map(choice => <label key={choice}><input type="radio" name={question.id} checked={answers[question.id] === choice} onChange={() => setAnswers({ ...answers, [question.id]: choice })} />{choice}</label>)}{question.allowFreeText !== false && <label><span>{nt("other")}</span><input placeholder={nt("answer")} onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })} /></label>}</fieldset>)}<button className="primary" disabled={analysis.questions.some(question => !answers[question.id]?.trim())} onClick={onContinue}>{nt("continue")}</button><button className="nutrition-manual-link" onClick={onManual}>{nt("reviewEstimate")}</button></div>;
+function scaleItemToWeight(item: NutritionItem, weight: number): NutritionItem {
+  const nextWeight = Math.max(0, weight);
+  if (!item || item.estimatedGrams <= 0)
+    return { ...item, estimatedGrams: nextWeight };
+  const ratio = nextWeight / item.estimatedGrams;
+  return {
+    ...item,
+    estimatedGrams: nextWeight,
+    calories: roundNutrient(item.calories * ratio, "calories"),
+    proteinGrams: roundNutrient(item.proteinGrams * ratio, "proteinGrams"),
+    fatGrams: roundNutrient(item.fatGrams * ratio, "fatGrams"),
+    carbsGrams: roundNutrient(item.carbsGrams * ratio, "carbsGrams"),
+    fiberGrams: roundNutrient(item.fiberGrams * ratio, "fiberGrams"),
+  };
+}
+
+function NumericInput({ value, onChange, step }: {
+  value: number;
+  onChange: (value: number) => void;
+  step?: number;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  const editing = useRef(false);
+  useEffect(() => {
+    if (!editing.current) setDraft(String(value));
+  }, [value]);
+  const update = (next: string) => {
+    setDraft(next);
+    if (next.trim() !== "" && Number.isFinite(Number(next)))
+      onChange(Math.max(0, Number(next)));
+  };
+  const finish = () => {
+    editing.current = false;
+    const next = draft.trim() === "" ? 0 : Math.max(0, Number(draft) || 0);
+    onChange(next);
+    setDraft(String(next));
+  };
+  return <input
+    type="number"
+    inputMode="decimal"
+    min="0"
+    step={step}
+    value={draft}
+    onFocus={(event) => { editing.current = true; event.currentTarget.select(); }}
+    onChange={(event) => update(event.target.value)}
+    onBlur={finish}
+  />;
+}
+
+function PhotoNutritionItemEditor({ item, onWeightChange }: {
+  item: NutritionItem;
+  onWeightChange: (weight: number) => void;
+}) {
+  return <fieldset className="nutrition-item nutrition-photo-item">
+    <strong>{item.name}</strong>
+    <label>{nt("grams")}<NumericInput value={item.estimatedGrams} onChange={onWeightChange} /></label>
+  </fieldset>;
 }
 
 function NutritionItemEditor({ item, onChange, onRemove }: { item: NutritionItem; onChange: (item: NutritionItem) => void; onRemove?: () => void }) {
-  const numeric = (key: keyof NutritionItem, value: string) => onChange({ ...item, [key]: Math.max(0, Number(value) || 0) });
-  return <fieldset className="nutrition-item"><div><input aria-label={nt("foodName")} placeholder={nt("foodName")} value={item.name} maxLength={120} onChange={event => onChange({ ...item, name: event.target.value })} />{onRemove && <button aria-label={nt("delete")} onClick={onRemove}><X /></button>}</div><div className="nutrition-item-fields"><label>{nt("grams")}<input type="number" inputMode="decimal" min="0" value={item.estimatedGrams} onChange={event => numeric("estimatedGrams", event.target.value)} /></label><label>kcal<input type="number" inputMode="decimal" min="0" value={item.calories} onChange={event => numeric("calories", event.target.value)} /></label><label>{nt("protein")}, {nt("gramShort")}<input type="number" inputMode="decimal" min="0" step="0.1" value={item.proteinGrams} onChange={event => numeric("proteinGrams", event.target.value)} /></label><label>{nt("fat")}, {nt("gramShort")}<input type="number" inputMode="decimal" min="0" step="0.1" value={item.fatGrams} onChange={event => numeric("fatGrams", event.target.value)} /></label><label>{nt("carbs")}, {nt("gramShort")}<input type="number" inputMode="decimal" min="0" step="0.1" value={item.carbsGrams} onChange={event => numeric("carbsGrams", event.target.value)} /></label><label>{nt("fiber")}, {nt("gramShort")}<input type="number" inputMode="decimal" min="0" step="0.1" value={item.fiberGrams} onChange={event => numeric("fiberGrams", event.target.value)} /></label></div></fieldset>;
+  const numeric = (key: keyof NutritionItem, value: number) => onChange({ ...item, [key]: value });
+  return <fieldset className="nutrition-item"><div><input aria-label={nt("foodName")} placeholder={nt("foodName")} value={item.name} maxLength={120} onChange={event => onChange({ ...item, name: event.target.value })} />{onRemove && <button aria-label={nt("delete")} onClick={onRemove}><X /></button>}</div><div className="nutrition-item-fields"><label>{nt("grams")}<NumericInput value={item.estimatedGrams} onChange={value => numeric("estimatedGrams", value)} /></label><label>kcal<NumericInput value={item.calories} onChange={value => numeric("calories", value)} /></label><label>{nt("protein")}, {nt("gramShort")}<NumericInput step={0.1} value={item.proteinGrams} onChange={value => numeric("proteinGrams", value)} /></label><label>{nt("fat")}, {nt("gramShort")}<NumericInput step={0.1} value={item.fatGrams} onChange={value => numeric("fatGrams", value)} /></label><label>{nt("carbs")}, {nt("gramShort")}<NumericInput step={0.1} value={item.carbsGrams} onChange={value => numeric("carbsGrams", value)} /></label><label>{nt("fiber")}, {nt("gramShort")}<NumericInput step={0.1} value={item.fiberGrams} onChange={value => numeric("fiberGrams", value)} /></label></div></fieldset>;
 }
 
 function ConsumedControl({ value, onChange }: { value: number; onChange: (value: number) => void }) {
