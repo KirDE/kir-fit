@@ -143,8 +143,8 @@ describe("nutrition mobile workflow", () => {
     expect(screen.getByText("No food recorded for this day.")).toBeTruthy();
   });
 
-  it("shows a saved estimate after provider failure and queues clarification without blocking", async () => {
-    let clarificationQueued = false;
+  it("treats a photo estimate as ready and lets only its weight be edited", async () => {
+    let photoDeleted = false;
     const analysis = {
       summary: "Breaded fish and vegetables",
       foods: [{
@@ -165,46 +165,57 @@ describe("nutrition mobile workflow", () => {
     };
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.includes("/clarify") && init?.method === "POST") {
-        clarificationQueued = true;
-        return new Response(JSON.stringify({
-          analysisId: "analysis-async-1",
-          status: "processing",
-          result: analysis,
-        }), { status: 202, headers: { "Content-Type": "application/json" } });
+      if (url.endsWith("/api/nutrition/photos/analysis-async-1") && init?.method === "DELETE") {
+        photoDeleted = true;
+        return new Response(null, { status: 204 });
       }
       if (url.endsWith("/api/nutrition/photos")) {
-        return new Response(JSON.stringify([{
+        return new Response(JSON.stringify(photoDeleted ? [] : [{
           analysisId: "analysis-async-1",
-          status: clarificationQueued ? "processing" : "manual_required",
+          status: "manual_required",
           createdAt: new Date().toISOString(),
           result: analysis,
-          failureCode: clarificationQueued ? undefined : "malformed_response",
-          message: clarificationQueued ? undefined : "The updated estimate was incomplete",
+          failureCode: "malformed_response",
+          message: "The updated estimate was incomplete",
           thumbnailUrl: null,
           metadata: { clarificationRound: 0 },
-        }]), { status: clarificationQueued ? 202 : 200, headers: { "Content-Type": "application/json" } });
+        }]), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       return new Response("{}", { status: 404 });
     }));
 
     const { container } = render(<Nutrition />);
     const open = await screen.findByRole("button", {
-      name: /breaded fish and vegetables.*answer questions/i,
+      name: /breaded fish and vegetables.*ready/i,
     });
     expect(container.querySelector(".nutrition-protein")?.textContent).toMatch(/30 \/ — g/);
     expect(container.querySelector(".nutrition-macros")?.textContent).toMatch(/360kcal/);
     expect(open.textContent).toMatch(/360 kcal.*30 g protein/i);
     fireEvent.click(open);
-    await screen.findByText(/estimated from a photo/i);
+    const details = await screen.findByRole("dialog");
+    expect(within(details).getByRole("heading", { name: /meal details/i })).toBeTruthy();
+    expect(within(details).getByText(/recognized from the photo/i)).toBeTruthy();
     expect(screen.queryByText(/photo analysis is unavailable/i)).toBeNull();
-    expect(screen.getByRole("button", { name: /review estimate/i })).toBeTruthy();
-    await screen.findByText("What is inside the breading?");
-    fireEvent.click(screen.getByLabelText("White fish"));
-    fireEvent.click(screen.getByRole("button", { name: /update estimate/i }));
-    await waitFor(() => expect(clarificationQueued).toBe(true));
-    await screen.findByText("Analysis in progress");
     expect(screen.queryByText("What is inside the breading?")).toBeNull();
+    expect(within(details).queryByLabelText("Meal name")).toBeNull();
+    expect(within(details).queryByLabelText("Food")).toBeNull();
+    const weight = within(details).getByRole("spinbutton") as HTMLInputElement;
+    expect(within(details).getAllByRole("spinbutton")).toHaveLength(1);
+    fireEvent.focus(weight);
+    fireEvent.change(weight, { target: { value: "" } });
+    expect(weight.value).toBe("");
+    fireEvent.change(weight, { target: { value: "360" } });
+    expect(weight.value).toBe("360");
+    expect(within(details).getByText("720")).toBeTruthy();
+    fireEvent.click(within(details).getByRole("button", { name: /save changes/i }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    const saved = JSON.parse(localStorage.getItem("kirfit_guest_nutrition_v1") || "{}");
+    expect(saved.entries[0]).toMatchObject({
+      title: "Breaded fish and vegetables",
+      calories: 720,
+      proteinGrams: 60,
+      items: [{ estimatedGrams: 360 }],
+    });
   });
 
   it("closes the chooser immediately and shows an uploading photo card", async () => {
@@ -251,7 +262,7 @@ describe("nutrition mobile workflow", () => {
     await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:meal-preview"));
   });
 
-  it("offers review instead of more questions after the clarification limit", async () => {
+  it("does not turn completed estimates back into a review step", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).endsWith("/api/nutrition/photos")) {
         return new Response(JSON.stringify([{
@@ -285,11 +296,12 @@ describe("nutrition mobile workflow", () => {
 
     render(<Nutrition />);
     const open = await screen.findByRole("button", {
-      name: /final fish estimate.*review estimate/i,
+      name: /final fish estimate.*ready/i,
     });
     fireEvent.click(open);
-    await screen.findByRole("heading", { name: /review meal/i });
+    await screen.findByRole("heading", { name: /meal details/i });
     expect(screen.queryByText("Another detail?")).toBeNull();
+    expect(screen.queryByText(/review estimate/i)).toBeNull();
   });
 
   it("labels the selected day and keeps meals separated while navigating", async () => {
@@ -507,7 +519,7 @@ describe("nutrition mobile workflow", () => {
     }));
 
     render(<Nutrition />);
-    const cardButton = await screen.findByRole("button", { name: /meal to delete.*review estimate/i });
+    const cardButton = await screen.findByRole("button", { name: /meal to delete.*ready/i });
     expect(screen.queryByLabelText("Delete pending photo")).toBeNull();
     expect(deleted).toBe(false);
 
