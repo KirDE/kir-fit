@@ -260,10 +260,12 @@ describe("nutrition mobile workflow", () => {
 
   it("keeps questions optional and marks them with a small card indicator", async () => {
     let clarificationQueued = false;
+    let clarificationAnswers: Record<string, string> = {};
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/clarify") && init?.method === "POST") {
         clarificationQueued = true;
+        clarificationAnswers = JSON.parse(String(init.body)).answers;
         return new Response(JSON.stringify({
           analysisId: "analysis-final-review",
           status: "processing",
@@ -311,9 +313,14 @@ describe("nutrition mobile workflow", () => {
     expect(within(details).getByText("Another detail?")).toBeTruthy();
     expect(screen.queryByText(/review estimate/i)).toBeNull();
     fireEvent.click(within(details).getByText("Optional questions"));
-    fireEvent.click(within(details).getByLabelText("Yes"));
+    fireEvent.change(within(details).getByLabelText("Comment"), {
+      target: { value: "The sauce was served separately" },
+    });
     fireEvent.click(within(details).getByRole("button", { name: /update estimate/i }));
     await waitFor(() => expect(clarificationQueued).toBe(true));
+    expect(clarificationAnswers).toEqual({
+      additional_context: "The sauce was served separately",
+    });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 

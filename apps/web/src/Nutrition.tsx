@@ -81,6 +81,8 @@ const copy = {
     questions: "A few details will improve the estimate",
     other: "Other",
     answer: "Your answer",
+    comment: "Comment",
+    commentPlaceholder: "Add any details that may improve the estimate",
     continue: "Update estimate",
     editDirectly: "Edit manually",
     review: "Review meal",
@@ -156,6 +158,8 @@ const copy = {
     questions: "Ein paar Details verbessern die Schätzung",
     other: "Andere",
     answer: "Deine Antwort",
+    comment: "Kommentar",
+    commentPlaceholder: "Weitere Details zur Verbesserung der Schätzung",
     continue: "Schätzung aktualisieren",
     editDirectly: "Manuell bearbeiten",
     review: "Mahlzeit prüfen",
@@ -231,6 +235,8 @@ const copy = {
     questions: "Несколько деталей сделают оценку точнее",
     other: "Другое",
     answer: "Ваш ответ",
+    comment: "Комментарий",
+    commentPlaceholder: "Добавьте любые уточнения для более точной оценки",
     continue: "Обновить оценку",
     editDirectly: "Исправить вручную",
     review: "Проверка блюда",
@@ -761,6 +767,10 @@ function OptionalQuestions({ analysis, onQueued }: {
       {question.choices.map((choice) => <label key={choice}><input type="radio" name={question.id} checked={answers[question.id] === choice} onChange={() => setAnswers({ ...answers, [question.id]: choice })} />{choice}</label>)}
       {question.allowFreeText !== false && <label><span>{nt("other")}</span><input placeholder={nt("answer")} onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })} /></label>}
     </fieldset>)}
+    <label className="nutrition-clarification-comment">
+      <span>{nt("comment")}</span>
+      <textarea maxLength={500} placeholder={nt("commentPlaceholder")} value={answers.additional_context || ""} onChange={(event) => setAnswers({ ...answers, additional_context: event.target.value })} />
+    </label>
     {error && <p className="nutrition-alert error">{error}</p>}
     <button className="primary" disabled={busy || !hasAnswer} onClick={async () => {
       setBusy(true);
