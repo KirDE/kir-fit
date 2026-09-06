@@ -157,11 +157,7 @@ describe("nutrition mobile workflow", () => {
         fiberGrams: { estimate: 1 },
       }],
       assumptions: [],
-      clarificationQuestions: [{
-        id: "protein",
-        question: "What is inside the breading?",
-        options: ["White fish", "Chicken"],
-      }],
+      clarificationQuestions: [],
     };
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -196,7 +192,7 @@ describe("nutrition mobile workflow", () => {
     expect(within(details).getByRole("heading", { name: /meal details/i })).toBeTruthy();
     expect(within(details).getByText(/recognized from the photo/i)).toBeTruthy();
     expect(screen.queryByText(/photo analysis is unavailable/i)).toBeNull();
-    expect(screen.queryByText("What is inside the breading?")).toBeNull();
+    expect(within(details).queryByText(/optional questions/i)).toBeNull();
     expect(within(details).queryByLabelText("Meal name")).toBeNull();
     expect(within(details).queryByLabelText("Food")).toBeNull();
     const weight = within(details).getByRole("spinbutton") as HTMLInputElement;
@@ -262,9 +258,18 @@ describe("nutrition mobile workflow", () => {
     await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:meal-preview"));
   });
 
-  it("does not turn completed estimates back into a review step", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input).endsWith("/api/nutrition/photos")) {
+  it("keeps questions optional and marks them with a small card indicator", async () => {
+    let clarificationQueued = false;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/clarify") && init?.method === "POST") {
+        clarificationQueued = true;
+        return new Response(JSON.stringify({
+          analysisId: "analysis-final-review",
+          status: "processing",
+        }), { status: 202, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.endsWith("/api/nutrition/photos")) {
         return new Response(JSON.stringify([{
           analysisId: "analysis-final-review",
           status: "completed",
@@ -287,7 +292,7 @@ describe("nutrition mobile workflow", () => {
               options: ["Yes", "No"],
             }],
           },
-          metadata: { clarificationRound: 1 },
+          metadata: { clarificationRound: 0 },
           thumbnailUrl: null,
         }]), { status: 200, headers: { "Content-Type": "application/json" } });
       }
@@ -296,12 +301,20 @@ describe("nutrition mobile workflow", () => {
 
     render(<Nutrition />);
     const open = await screen.findByRole("button", {
-      name: /final fish estimate.*ready/i,
+      name: /final fish estimate.*ready.*optional questions/i,
     });
+    expect(within(open).getByLabelText("Optional questions")).toBeTruthy();
+    expect(screen.getByText("30 / — g")).toBeTruthy();
     fireEvent.click(open);
-    await screen.findByRole("heading", { name: /meal details/i });
-    expect(screen.queryByText("Another detail?")).toBeNull();
+    const details = await screen.findByRole("dialog");
+    expect(within(details).getByRole("heading", { name: /meal details/i })).toBeTruthy();
+    expect(within(details).getByText("Another detail?")).toBeTruthy();
     expect(screen.queryByText(/review estimate/i)).toBeNull();
+    fireEvent.click(within(details).getByText("Optional questions"));
+    fireEvent.click(within(details).getByLabelText("Yes"));
+    fireEvent.click(within(details).getByRole("button", { name: /update estimate/i }));
+    await waitFor(() => expect(clarificationQueued).toBe(true));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
   it("labels the selected day and keeps meals separated while navigating", async () => {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
+  CircleHelp,
   Clock3,
   ChevronLeft,
   ChevronRight,
@@ -17,6 +18,7 @@ import { token } from "./api";
 import {
   analyzeMeal,
   analysisHeaders,
+  clarifyMeal,
   deletePhotoAnalysis,
   deleteNutritionEntry,
   emptyNutrients,
@@ -64,6 +66,7 @@ const copy = {
     queued: "Photo added. Analysis continues in the background.",
     processing: "Analysis in progress",
     ready: "Ready",
+    optionalQuestions: "Optional questions",
     answerQuestions: "Answer questions",
     reviewEstimate: "Review estimate",
     analysisFailedShort: "Analysis failed — enter manually",
@@ -138,6 +141,7 @@ const copy = {
     queued: "Foto hinzugefügt. Die Analyse läuft im Hintergrund weiter.",
     processing: "Analyse läuft",
     ready: "Fertig",
+    optionalQuestions: "Optionale Fragen",
     answerQuestions: "Fragen beantworten",
     reviewEstimate: "Schätzung prüfen",
     analysisFailedShort: "Analyse fehlgeschlagen — manuell eingeben",
@@ -212,6 +216,7 @@ const copy = {
     queued: "Фото добавлено. Анализ продолжается в фоне.",
     processing: "Идёт анализ",
     ready: "Готово",
+    optionalQuestions: "Есть уточняющие вопросы",
     answerQuestions: "Ответить на вопросы",
     reviewEstimate: "Проверить оценку",
     analysisFailedShort: "Не удалось распознать — ввести вручную",
@@ -546,6 +551,7 @@ export function Nutrition() {
               setPendingUploads((current) => current.filter((item) => item.id !== upload.id));
             });
         }}
+        onQueued={() => { setEditor(undefined); load(false); }}
         onSaved={() => { setEditor(undefined); load(); }}
         onDelete={editor !== "new" ? () => setDeleteTarget(editor) : undefined}
       />}
@@ -572,6 +578,11 @@ function PhotoAnalysisCard({ job, onOpen }: {
     ? normalizeMealAnalysis(job)
     : undefined;
   const totals = normalized ? sumItems(normalized.items) : undefined;
+  const hasOptionalQuestions = Boolean(
+    normalized?.questions.length &&
+    normalized.clarificationRound < 1 &&
+    job.status !== "processing",
+  );
   const label = job.status === "processing"
     ? nt("processing")
     : normalized
@@ -587,7 +598,10 @@ function PhotoAnalysisCard({ job, onOpen }: {
         <small>{label}</small>
         {totals && <small>{Math.round(totals.calories)} kcal · {Math.round(totals.proteinGrams)} {nt("gramShort")} {nt("protein").toLocaleLowerCase()}</small>}
       </span>
-      {job.status === "processing" ? <RefreshCw className="nutrition-spin" /> : <ChevronRight />}
+      {job.status === "processing" ? <RefreshCw className="nutrition-spin" /> : <span className="nutrition-analysis-actions">
+        {hasOptionalQuestions && <span className="nutrition-question-indicator" aria-label={nt("optionalQuestions")} title={nt("optionalQuestions")}><CircleHelp size={17} /></span>}
+        <ChevronRight />
+      </span>}
     </button>
   </div>;
 }
@@ -644,12 +658,13 @@ function MacroGrid({ nutrients }: { nutrients: Nutrients }) {
   </div>;
 }
 
-function MealEditor({ value, job, date, onClose, onUpload, onSaved, onDelete }: {
+function MealEditor({ value, job, date, onClose, onUpload, onQueued, onSaved, onDelete }: {
   value?: NutritionEntry;
   job?: PhotoAnalysisJob;
   date: string;
   onClose: () => void;
   onUpload: (file: File) => void;
+  onQueued: () => void;
   onSaved: () => void;
   onDelete?: () => void;
 }) {
@@ -716,6 +731,7 @@ function MealEditor({ value, job, date, onClose, onUpload, onSaved, onDelete }: 
           : <NutritionItemEditor key={item.id || index} item={item} onChange={(next) => setItems(current => current.map((old, i) => i === index ? next : old))} onRemove={items.length > 1 ? () => setItems(current => current.filter((_, i) => i !== index)) : undefined} />)}
         {!photoResult && <button className="nutrition-add-item" onClick={() => setItems(current => [...current, emptyItem()])}><Plus />{nt("addItem")}</button>}
         <MacroGrid nutrients={full} />
+        {job && analysis && analysis.questions.length > 0 && analysis.clarificationRound < 1 && <OptionalQuestions analysis={analysis} onQueued={onQueued} />}
         {!photoResult && <ConsumedControl value={consumedPercent} onChange={setConsumedPercent} />}
         {!photoResult && consumedPercent === 0 && <p className="nutrition-alert">{nt("discardZero")}</p>}
         <button className="primary nutrition-save" disabled={saving || consumedPercent === 0 || !title.trim() || items.some(item => !item.name.trim())} onClick={async () => {
@@ -727,6 +743,37 @@ function MealEditor({ value, job, date, onClose, onUpload, onSaved, onDelete }: 
       {onDelete && <button className="nutrition-delete" onClick={onDelete}><Trash2 /> {nt("delete")}</button>}
     </div>
   </div>;
+}
+
+function OptionalQuestions({ analysis, onQueued }: {
+  analysis: MealAnalysis;
+  onQueued: () => void;
+}) {
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const hasAnswer = Object.values(answers).some((answer) => answer.trim());
+  return <details className="nutrition-optional-questions">
+    <summary><CircleHelp size={18} />{nt("optionalQuestions")}</summary>
+    <p>{nt("questions")}</p>
+    {analysis.questions.map((question) => <fieldset key={question.id}>
+      <legend>{question.text}</legend>
+      {question.choices.map((choice) => <label key={choice}><input type="radio" name={question.id} checked={answers[question.id] === choice} onChange={() => setAnswers({ ...answers, [question.id]: choice })} />{choice}</label>)}
+      {question.allowFreeText !== false && <label><span>{nt("other")}</span><input placeholder={nt("answer")} onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })} /></label>}
+    </fieldset>)}
+    {error && <p className="nutrition-alert error">{error}</p>}
+    <button className="primary" disabled={busy || !hasAnswer} onClick={async () => {
+      setBusy(true);
+      setError("");
+      try {
+        await clarifyMeal(analysis, answers);
+        onQueued();
+      } catch {
+        setError(nt("analysisFailed"));
+        setBusy(false);
+      }
+    }}>{nt("continue")}</button>
+  </details>;
 }
 
 function scaleItemToWeight(item: NutritionItem, weight: number): NutritionItem {
