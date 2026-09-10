@@ -149,6 +149,11 @@ export interface MealAnalysisProvider {
     signal?: AbortSignal,
     language?: "en" | "de" | "ru",
   ): Promise<MealAnalysisResponse>;
+  analyzeText?(
+    description: string,
+    signal?: AbortSignal,
+    language?: "en" | "de" | "ru",
+  ): Promise<MealAnalysisResponse>;
 }
 
 /**
@@ -372,6 +377,17 @@ materially improve identification or nutrition estimates. Do not search for gene
 foods. Treat search results as supporting evidence, not as proof of the photographed portion. Do
 not give medical advice.`;
 
+const textSystemPrompt = `You estimate nutrition from a user's short written description of a meal.
+Output estimates, never facts. The summary is a short display title for the meal: 2-8 words and at
+most 60 characters. List the foods and portions implied by the description, with ranges for every
+portion and nutrient. Do not invent ingredients that are not stated or normally intrinsic to the
+named dish. Explicitly surface unknown oil, sauce, sugar, cream, cheese, cooking method and portion
+scale. Any uncertainty likely to change calories or protein by 15% or more is material and must have
+a short targeted clarification question. Ask at most four distinct questions. Use web search when a
+brand, packaged product, restaurant item or unfamiliar named dish could materially improve the
+estimate; do not search for generic foods. Treat search results as supporting evidence. Do not give
+medical advice.`;
+
 export class OpenAiMealAnalysisProvider implements MealAnalysisProvider {
   constructor(
     private readonly options: {
@@ -414,6 +430,20 @@ export class OpenAiMealAnalysisProvider implements MealAnalysisProvider {
           text: `${localizedPrompt(language)}\nRevise the prior analysis using only the user's answers below. This is the only clarification round: set clarificationQuestions to an empty array after updating the estimate. Preserve ranges and assumptions for any uncertainty that remains.\nPrior analysis: ${JSON.stringify(prior)}\nUser answers: ${JSON.stringify(answers)}`,
         },
       ],
+      signal,
+    );
+  }
+
+  async analyzeText(
+    description: string,
+    signal?: AbortSignal,
+    language: "en" | "de" | "ru" = "en",
+  ): Promise<MealAnalysisResponse> {
+    return this.requestStructuredAnalysis(
+      [{
+        type: "input_text",
+        text: `${localizedTextPrompt(language)}\nMeal description: ${description}`,
+      }],
       signal,
     );
   }
@@ -583,6 +613,11 @@ export class OpenAiMealAnalysisProvider implements MealAnalysisProvider {
 function localizedPrompt(language: "en" | "de" | "ru") {
   const name = language === "ru" ? "Russian" : language === "de" ? "German" : "English";
   return `${systemPrompt}\nWrite all user-visible names, summaries, assumptions and clarification questions in ${name}.`;
+}
+
+function localizedTextPrompt(language: "en" | "de" | "ru") {
+  const name = language === "ru" ? "Russian" : language === "de" ? "German" : "English";
+  return `${textSystemPrompt}\nWrite all user-visible names, summaries, assumptions and clarification questions in ${name}.`;
 }
 
 export function createMealAnalysisProviderFromEnvironment() {

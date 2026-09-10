@@ -72,6 +72,55 @@ async function waitForJob(
 }
 
 describe("private nutrition photo routes", () => {
+  it("estimates a manually described meal through the protected AI route", async () => {
+    const analyze = vi.fn(async () => ({
+      analysis: mealAnalysisV1Fixtures[0],
+      metadata: {
+        provider: "fixture",
+        model: "fixture-v1",
+        schemaVersion: "meal-photo-v1",
+        latencyMs: 1,
+        inputTokens: null,
+        outputTokens: null,
+        estimatedCostUsd: null,
+      },
+    }));
+    const analyzeText = vi.fn(async () => ({
+      analysis: mealAnalysisV1Fixtures[1],
+      metadata: {
+        provider: "fixture",
+        model: "fixture-v1",
+        schemaVersion: "meal-photo-v1",
+        latencyMs: 1,
+        inputTokens: null,
+        outputTokens: null,
+        estimatedCostUsd: null,
+      },
+    }));
+    const url = await testServer({ analyze, analyzeText });
+
+    const response = await fetch(`${url}/api/nutrition/photos/analyze-text`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept-Language": "ru",
+        "x-test-owner": "owner-a",
+      },
+      body: JSON.stringify({ description: "250 граммов курицы с рисом" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      analysis: { summary: mealAnalysisV1Fixtures[1].summary },
+      metadata: { provider: "fixture" },
+    });
+    expect(analyzeText).toHaveBeenCalledWith(
+      "250 граммов курицы с рисом",
+      undefined,
+      "ru",
+    );
+  });
+
   it("analyzes once, ignores claimed MIME/extension and ownership-protects bytes", async () => {
     const analyze = vi.fn(async () => ({
       analysis: mealAnalysisV1Fixtures[0],

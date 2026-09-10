@@ -49,6 +49,49 @@ describe("nutrition mobile workflow", () => {
     expect(screen.getByText("300 kcal")).toBeTruthy();
   });
 
+  it("recognizes a manually described meal and keeps the estimate editable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/nutrition/photos/analyze-text") && init?.method === "POST") {
+        expect(JSON.parse(String(init.body))).toEqual({ description: "Chicken curry with rice" });
+        return Response.json({ analysis: {
+          summary: "Chicken curry with rice",
+          foods: [{
+            name: "Chicken curry and rice",
+            portion: { estimatedGrams: 450 },
+            calories: { estimate: 680 },
+            proteinGrams: { estimate: 42 },
+            fatGrams: { estimate: 24 },
+            carbsGrams: { estimate: 72 },
+            fiberGrams: { estimate: 6 },
+          }],
+          assumptions: [],
+          clarificationQuestions: [],
+        } });
+      }
+      if (url.endsWith("/api/nutrition/photos"))
+        return new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } });
+      return new Response("{}", { status: 404 });
+    }));
+
+    render(<Nutrition />);
+    await screen.findByText("No food recorded for this day.");
+    fireEvent.click(screen.getByRole("button", { name: /add food/i }));
+    fireEvent.click(screen.getByRole("button", { name: /enter manually/i }));
+    const title = screen.getByLabelText("Meal name");
+    expect((screen.getByRole("button", { name: /estimate from description/i }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(title, { target: { value: "Chicken curry with rice" } });
+    fireEvent.click(screen.getByRole("button", { name: /estimate from description/i }));
+
+    await waitFor(() => expect((screen.getByLabelText("Food") as HTMLInputElement).value).toBe("Chicken curry and rice"));
+    const numeric = within(screen.getByLabelText("Food").closest("fieldset")!).getAllByRole("spinbutton");
+    expect(numeric.map((input) => (input as HTMLInputElement).value)).toEqual([
+      "450", "680", "42", "24", "72", "6",
+    ]);
+    fireEvent.change(numeric[0], { target: { value: "500" } });
+    expect((numeric[0] as HTMLInputElement).value).toBe("500");
+  });
+
   it("includes today's completed photo estimates on the home dashboard", async () => {
     localStorage.setItem(
       "kirfit_guest_nutrition_v1",
