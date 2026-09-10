@@ -175,6 +175,22 @@ export const analyzeMeal = (file: File, occurredOn: string) => {
   );
 };
 
+export async function analyzeMealText(description: string) {
+  const headers = analysisHeaders();
+  headers.set("Content-Type", "application/json");
+  const response = await fetch("/api/nutrition/photos/analyze-text", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ description: description.trim() }),
+  });
+  if (!response.ok) {
+    const problem = await response.json().catch(() => ({}));
+    throw new Error(problem.error || "Text meal analysis unavailable");
+  }
+  const result = await response.json();
+  return result.analysis as unknown;
+}
+
 export const clarifyMeal = (
   analysis: MealAnalysis,
   answers: Record<string, string>,

@@ -9,6 +9,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Sparkles,
   Trash2,
   Utensils,
   X,
@@ -17,6 +18,7 @@ import { getLanguage } from "./i18n";
 import { token } from "./api";
 import {
   analyzeMeal,
+  analyzeMealText,
   analysisHeaders,
   clarifyMeal,
   deletePhotoAnalysis,
@@ -62,6 +64,10 @@ const copy = {
     camera: "Take photo",
     gallery: "Choose photo",
     manual: "Enter manually",
+    recognizeText: "Estimate from description",
+    recognizingText: "Estimating…",
+    textHint: "Describe the dish, ingredients or restaurant item",
+    textAnalysisFailed: "Could not estimate this description. You can still enter values manually.",
     analyzing: "Estimating food and portions…",
     queued: "Photo added. Analysis continues in the background.",
     processing: "Analysis in progress",
@@ -139,6 +145,10 @@ const copy = {
     camera: "Foto aufnehmen",
     gallery: "Foto auswählen",
     manual: "Manuell eingeben",
+    recognizeText: "Aus Beschreibung schätzen",
+    recognizingText: "Wird geschätzt…",
+    textHint: "Gericht, Zutaten oder Restaurantprodukt beschreiben",
+    textAnalysisFailed: "Diese Beschreibung konnte nicht geschätzt werden. Du kannst die Werte weiterhin manuell eingeben.",
     analyzing: "Lebensmittel und Portionen werden geschätzt…",
     queued: "Foto hinzugefügt. Die Analyse läuft im Hintergrund weiter.",
     processing: "Analyse läuft",
@@ -216,6 +226,10 @@ const copy = {
     camera: "Сфотографировать",
     gallery: "Выбрать фото",
     manual: "Ввести вручную",
+    recognizeText: "Распознать по описанию",
+    recognizingText: "Распознаю…",
+    textHint: "Опишите блюдо, ингредиенты или позицию из ресторана",
+    textAnalysisFailed: "Не удалось оценить блюдо по описанию. Значения можно ввести вручную.",
     analyzing: "Оцениваю состав и размер порций…",
     queued: "Фото добавлено. Анализ продолжается в фоне.",
     processing: "Идёт анализ",
@@ -698,6 +712,7 @@ function MealEditor({ value, job, date, onClose, onUpload, onQueued, onSaved, on
   const [consumedPercent, setConsumedPercent] = useState(value?.consumedPercent ?? 100);
   const [error, setError] = useState(job?.status === "manual_required" && !initialAnalysis ? nt("analysisFailed") : "");
   const [saving, setSaving] = useState(false);
+  const [recognizingText, setRecognizingText] = useState(false);
   const galleryRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const chooseFile = async (file?: File) => {
@@ -728,7 +743,20 @@ function MealEditor({ value, job, date, onClose, onUpload, onQueued, onSaved, on
       {stage === "review" && <div className="nutrition-review">
         {analysis && <div className="nutrition-estimate"><b>{nt("estimated")}</b>{analysis.uncertainty && <p><strong>{nt("uncertainty")}:</strong> {analysis.uncertainty}</p>}{analysis.assumptions.length > 0 && <details><summary>{nt("assumptions")}</summary><ul>{analysis.assumptions.map((item, index) => <li key={index}>{item}</li>)}</ul></details>}{analysis.sources && analysis.sources.length > 0 && <details><summary>{nt("sources")}</summary><ul>{analysis.sources.map((source) => <li key={source.url}><a href={source.url} target="_blank" rel="noreferrer">{source.title}</a></li>)}</ul></details>}</div>}
         {photoResult ? <h3 className="nutrition-photo-title">{title}</h3> : <>
-          <label>{nt("mealName")}<input value={title} maxLength={120} onChange={(event) => setTitle(event.target.value)} /></label>
+          <label>{nt("mealName")}<input value={title} maxLength={120} placeholder={nt("textHint")} onChange={(event) => setTitle(event.target.value)} /></label>
+          <button className="nutrition-recognize-text" disabled={recognizingText || title.trim().length < 2} onClick={async () => {
+            setRecognizingText(true);
+            setError("");
+            try {
+              const result = normalizeMealAnalysis(await analyzeMealText(title));
+              setTitle(result.title);
+              setItems(structuredClone(result.items));
+            } catch {
+              setError(nt("textAnalysisFailed"));
+            } finally {
+              setRecognizingText(false);
+            }
+          }}>{recognizingText ? <RefreshCw className="nutrition-spin" /> : <Sparkles />} {nt(recognizingText ? "recognizingText" : "recognizeText")}</button>
           <label>{nt("manual")}<select value={mealType} onChange={(event) => setMealType(event.target.value as NutritionEntry["mealType"])}>{(["breakfast", "lunch", "dinner", "snack"] as const).map(type => <option key={type} value={type}>{nt(type)}</option>)}</select></label>
         </>}
         <p className="nutrition-full-serving">{nt("fullServing")}</p>

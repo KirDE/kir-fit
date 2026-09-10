@@ -154,6 +154,43 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
     }),
   );
 
+  router.post(
+    "/analyze-text",
+    analysisLimit,
+    identityLimit,
+    express.json({ limit: "8kb" }),
+    asyncHandler(async (request, response) => {
+      const { description } = z.strictObject({
+        description: z.string().trim().min(2).max(500),
+      }).parse(request.body);
+      if (!provider.analyzeText)
+        return response.status(501).json({
+          error: "Text meal analysis is not configured",
+          code: "text_analysis_not_supported",
+        });
+      try {
+        const result = await provider.analyzeText(
+          description,
+          undefined,
+          requestLanguage(request),
+        );
+        return response.json({ analysis: result.analysis, metadata: result.metadata });
+      } catch (error) {
+        if (!(error instanceof MealAnalysisProviderError)) throw error;
+        const status = error.code === "rate_limited" || error.code === "quota_exhausted"
+          ? 429
+          : error.code === "timeout" || error.code === "provider_unavailable"
+            ? 503
+            : 422;
+        return response.status(status).json({
+          error: error.message,
+          code: error.code,
+          retryable: error.retryable,
+        });
+      }
+    }),
+  );
+
   router.get(
     "/:analysisId/thumbnail",
     asyncHandler(async (request, response) => {

@@ -50,6 +50,29 @@ describe("meal analysis schema v1 fixtures", () => {
 });
 
 describe("OpenAI meal analysis adapter", () => {
+  it("estimates a meal from text without sending an image", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body));
+      expect(request.input[0].content).toEqual([
+        expect.objectContaining({
+          type: "input_text",
+          text: expect.stringContaining("Meal description: 250 g chicken curry with rice"),
+        }),
+      ]);
+      expect(request.input[0].content[0].text).toContain("written description");
+      return Response.json({ output_text: JSON.stringify(mealAnalysisV1Fixtures[0]) });
+    });
+    const provider = new OpenAiMealAnalysisProvider({
+      apiKey: "test-only-key",
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    const result = await provider.analyzeText("250 g chicken curry with rice", undefined, "en");
+
+    expect(result.analysis.summary).toBe("Mixed salad");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("uses strict structured output and returns bounded metadata", async () => {
     const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const request = JSON.parse(String(init?.body));

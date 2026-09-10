@@ -463,6 +463,9 @@
 .nutrition-add-item,
 .nutrition-manual-link,
 .nutrition-delete { min-height: 48px; display: flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); color: var(--text); }
+.nutrition-recognize-text { min-height: 48px; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid #6e7a45; border-radius: 13px; background: #272b1d; color: var(--accent); font-weight: 800; }
+.nutrition-recognize-text:disabled { opacity: .55; }
+.nutrition-recognize-text svg { width: 19px; height: 19px; }
 .nutrition-delete { width: 100%; margin-top: 14px; color: var(--danger); }
 .nutrition-photo-title { margin: 0; font-size: 1.2rem; }
 .nutrition-photo-item { display: grid; gap: 10px; }
