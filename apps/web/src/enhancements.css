@@ -385,6 +385,7 @@
   background: var(--panel2);
 }
 .nutrition-entry-icon { display: grid; place-items: center; color: var(--muted); }
+.nutrition-entry-icon.nutrition-failed-indicator { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, var(--panel2)); }
 .nutrition-entry > span:nth-child(2) { grid-row: 1 / span 2; min-width: 0; display: grid; gap: 4px; }
 .nutrition-entry b { overflow: hidden; text-overflow: ellipsis; }
 .nutrition-entry small { color: var(--muted); }
@@ -392,6 +393,7 @@
 .nutrition-entry > small { text-align: right; }
 .nutrition-analysis-card { display: flex; padding: 0; overflow: hidden; }
 .nutrition-analysis-card.processing { border-color: #6e7a45; }
+.nutrition-analysis-card.manual_required { border-color: var(--danger); }
 .nutrition-analysis-open {
   min-width: 0;
   flex: 1;

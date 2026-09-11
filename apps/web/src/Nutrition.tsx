@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
+  CircleAlert,
   CircleHelp,
   Clock3,
   ChevronLeft,
@@ -29,6 +30,7 @@ import {
   nutritionDay,
   photoAnalysisJobs,
   roundNutrient,
+  retryMealText,
   saveNutritionEntry,
   sumItems,
 } from "./nutrition";
@@ -79,6 +81,7 @@ const copy = {
     queuedHint: "You can close Fit and return later.",
     cancelAnalysis: "Delete pending photo",
     estimated: "Recognized from the photo.",
+    estimatedFromText: "Recognized from the description.",
     privatePhoto: "Your photo is processed privately and is not published.",
     analysisFailed: "Photo analysis is unavailable. You can enter the meal manually.",
     offlinePhoto: "Photo analysis needs an internet connection. Manual entry still works.",
@@ -160,6 +163,7 @@ const copy = {
     queuedHint: "Du kannst Fit schließen und später zurückkehren.",
     cancelAnalysis: "Ausstehendes Foto löschen",
     estimated: "Aus dem Foto erkannt.",
+    estimatedFromText: "Aus der Beschreibung erkannt.",
     privatePhoto: "Das Foto wird privat verarbeitet und nicht veröffentlicht.",
     analysisFailed: "Die Fotoanalyse ist nicht verfügbar. Du kannst das Essen manuell eingeben.",
     offlinePhoto: "Die Fotoanalyse benötigt Internet. Manuelle Eingabe funktioniert weiterhin.",
@@ -241,6 +245,7 @@ const copy = {
     queuedHint: "Fit можно закрыть и вернуться позже.",
     cancelAnalysis: "Удалить необработанное фото",
     estimated: "Распознано по фотографии.",
+    estimatedFromText: "Распознано по описанию.",
     privatePhoto: "Фото обрабатывается приватно и нигде не публикуется.",
     analysisFailed: "Анализ фото недоступен. Можно ввести блюдо вручную.",
     offlinePhoto: "Для анализа фото нужен интернет. Ручной ввод продолжает работать.",
@@ -498,6 +503,49 @@ export function Nutrition() {
         .filter((group) => group.entries.length),
     [day],
   );
+  const queueTextAnalysis = (
+    description: string,
+    retryJob?: PhotoAnalysisJob,
+  ) => {
+    const trimmed = description.trim();
+    setEditor(undefined);
+    setUploadError("");
+    if (retryJob && retryJob.failureCode !== "client_queue_failed") {
+      setJobs((current) => current.map((job) => job.analysisId === retryJob.analysisId
+        ? { ...job, status: "processing", failureCode: undefined, message: undefined }
+        : job));
+      void retryMealText(retryJob.analysisId)
+        .then((queued) => setJobs((current) => current.map((job) =>
+          job.analysisId === retryJob.analysisId ? queued : job)))
+        .catch(() => setJobs((current) => current.map((job) =>
+          job.analysisId === retryJob.analysisId
+            ? { ...job, status: "manual_required", failureCode: "client_queue_failed", message: nt("textAnalysisFailed"), retryable: true }
+            : job)));
+      return;
+    }
+    const temporaryId = `text-${crypto.randomUUID()}`;
+    const optimistic: PhotoAnalysisJob = {
+      analysisId: temporaryId,
+      status: "processing",
+      sourceKind: "text",
+      description: trimmed,
+      occurredOn: date,
+      createdAt: new Date().toISOString(),
+    };
+    setJobs((current) => [
+      optimistic,
+      ...current.filter((job) => job.analysisId !== retryJob?.analysisId),
+    ]);
+    void analyzeMealText(trimmed, date)
+      .then((queued) => setJobs((current) => [
+        queued,
+        ...current.filter((job) => job.analysisId !== temporaryId && job.analysisId !== queued.analysisId),
+      ]))
+      .catch(() => setJobs((current) => current.map((job) =>
+        job.analysisId === temporaryId
+          ? { ...job, status: "manual_required", failureCode: "client_queue_failed", message: nt("textAnalysisFailed"), retryable: true }
+          : job)));
+  };
   return (
     <section className="nutrition-page">
       <header>
@@ -572,6 +620,12 @@ export function Nutrition() {
             });
         }}
         onQueued={() => { setEditor(undefined); load(false); }}
+        onTextQueued={(description) => queueTextAnalysis(
+          description,
+          editor !== "new" && "analysisId" in editor && editor.sourceKind === "text"
+            ? editor
+            : undefined,
+        )}
         onSaved={() => { setEditor(undefined); load(); }}
         onDelete={editor !== "new" ? () => setDeleteTarget(editor) : undefined}
       />}
@@ -612,9 +666,11 @@ function PhotoAnalysisCard({ job, onOpen }: {
     <button className="nutrition-analysis-open" onClick={onOpen}>
       {job.thumbnailUrl
         ? <PrivateThumbnail src={job.thumbnailUrl} />
-        : <span className="nutrition-entry-icon"><Clock3 /></span>}
+        : <span className={`nutrition-entry-icon ${job.status === "manual_required" ? "nutrition-failed-indicator" : ""}`}>
+            {job.status === "manual_required" ? <CircleAlert /> : <Clock3 />}
+          </span>}
       <span>
-        <b>{normalized?.title || nt("processing")}</b>
+        <b>{normalized?.title || job.description || nt("processing")}</b>
         <small>{label}</small>
         {totals && <small>{Math.round(totals.calories)} kcal · {Math.round(totals.proteinGrams)} {nt("gramShort")} {nt("protein").toLocaleLowerCase()}</small>}
       </span>
@@ -678,13 +734,14 @@ function MacroGrid({ nutrients }: { nutrients: Nutrients }) {
   </div>;
 }
 
-function MealEditor({ value, job, date, onClose, onUpload, onQueued, onSaved, onDelete }: {
+function MealEditor({ value, job, date, onClose, onUpload, onQueued, onTextQueued, onSaved, onDelete }: {
   value?: NutritionEntry;
   job?: PhotoAnalysisJob;
   date: string;
   onClose: () => void;
   onUpload: (file: File) => void;
   onQueued: () => void;
+  onTextQueued: (description: string) => void;
   onSaved: () => void;
   onDelete?: () => void;
 }) {
@@ -707,12 +764,13 @@ function MealEditor({ value, job, date, onClose, onUpload, onQueued, onSaved, on
       : [emptyItem()];
   const [items, setItems] = useState<NutritionItem[]>(initialItems);
   const baseItems = useRef(initialItems);
-  const [title, setTitle] = useState(value?.title || initialAnalysis?.title || "");
+  const [title, setTitle] = useState(value?.title || initialAnalysis?.title || job?.description || "");
   const [mealType, setMealType] = useState<NutritionEntry["mealType"]>(value?.mealType || "snack");
   const [consumedPercent, setConsumedPercent] = useState(value?.consumedPercent ?? 100);
-  const [error, setError] = useState(job?.status === "manual_required" && !initialAnalysis ? nt("analysisFailed") : "");
+  const [error, setError] = useState(job?.status === "manual_required" && !initialAnalysis
+    ? nt(job.sourceKind === "text" ? "textAnalysisFailed" : "analysisFailed")
+    : "");
   const [saving, setSaving] = useState(false);
-  const [recognizingText, setRecognizingText] = useState(false);
   const galleryRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const chooseFile = async (file?: File) => {
@@ -741,22 +799,12 @@ function MealEditor({ value, job, date, onClose, onUpload, onQueued, onSaved, on
       </div>}
       {stage === "loading" && <div className="nutrition-analyzing" aria-live="polite"><i /><p>{nt("processing")}</p><small>{nt("queuedHint")}</small></div>}
       {stage === "review" && <div className="nutrition-review">
-        {analysis && <div className="nutrition-estimate"><b>{nt("estimated")}</b>{analysis.uncertainty && <p><strong>{nt("uncertainty")}:</strong> {analysis.uncertainty}</p>}{analysis.assumptions.length > 0 && <details><summary>{nt("assumptions")}</summary><ul>{analysis.assumptions.map((item, index) => <li key={index}>{item}</li>)}</ul></details>}{analysis.sources && analysis.sources.length > 0 && <details><summary>{nt("sources")}</summary><ul>{analysis.sources.map((source) => <li key={source.url}><a href={source.url} target="_blank" rel="noreferrer">{source.title}</a></li>)}</ul></details>}</div>}
+        {analysis && <div className="nutrition-estimate"><b>{nt(job?.sourceKind === "text" ? "estimatedFromText" : "estimated")}</b>{analysis.uncertainty && <p><strong>{nt("uncertainty")}:</strong> {analysis.uncertainty}</p>}{analysis.assumptions.length > 0 && <details><summary>{nt("assumptions")}</summary><ul>{analysis.assumptions.map((item, index) => <li key={index}>{item}</li>)}</ul></details>}{analysis.sources && analysis.sources.length > 0 && <details><summary>{nt("sources")}</summary><ul>{analysis.sources.map((source) => <li key={source.url}><a href={source.url} target="_blank" rel="noreferrer">{source.title}</a></li>)}</ul></details>}</div>}
         {photoResult ? <h3 className="nutrition-photo-title">{title}</h3> : <>
           <label>{nt("mealName")}<input value={title} maxLength={120} placeholder={nt("textHint")} onChange={(event) => setTitle(event.target.value)} /></label>
-          <button className="nutrition-recognize-text" disabled={recognizingText || title.trim().length < 2} onClick={async () => {
-            setRecognizingText(true);
-            setError("");
-            try {
-              const result = normalizeMealAnalysis(await analyzeMealText(title));
-              setTitle(result.title);
-              setItems(structuredClone(result.items));
-            } catch {
-              setError(nt("textAnalysisFailed"));
-            } finally {
-              setRecognizingText(false);
-            }
-          }}>{recognizingText ? <RefreshCw className="nutrition-spin" /> : <Sparkles />} {nt(recognizingText ? "recognizingText" : "recognizeText")}</button>
+          <button className="nutrition-recognize-text" disabled={title.trim().length < 2} onClick={() => onTextQueued(title)}>
+            <Sparkles /> {nt(job?.status === "manual_required" && job.sourceKind === "text" ? "retry" : "recognizeText")}
+          </button>
           <label>{nt("manual")}<select value={mealType} onChange={(event) => setMealType(event.target.value as NutritionEntry["mealType"])}>{(["breakfast", "lunch", "dinner", "snack"] as const).map(type => <option key={type} value={type}>{nt(type)}</option>)}</select></label>
         </>}
         <p className="nutrition-full-serving">{nt("fullServing")}</p>

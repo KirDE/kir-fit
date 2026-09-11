@@ -49,25 +49,18 @@ describe("nutrition mobile workflow", () => {
     expect(screen.getByText("300 kcal")).toBeTruthy();
   });
 
-  it("recognizes a manually described meal and keeps the estimate editable", async () => {
+  it("closes the editor immediately and queues text recognition in the background", async () => {
+    let resolveQueued!: (response: Response) => void;
+    const queuedResponse = new Promise<Response>((resolve) => { resolveQueued = resolve; });
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/api/nutrition/photos/analyze-text") && init?.method === "POST") {
-        expect(JSON.parse(String(init.body))).toEqual({ description: "Chicken curry with rice" });
-        return Response.json({ analysis: {
-          summary: "Chicken curry with rice",
-          foods: [{
-            name: "Chicken curry and rice",
-            portion: { estimatedGrams: 450 },
-            calories: { estimate: 680 },
-            proteinGrams: { estimate: 42 },
-            fatGrams: { estimate: 24 },
-            carbsGrams: { estimate: 72 },
-            fiberGrams: { estimate: 6 },
-          }],
-          assumptions: [],
-          clarificationQuestions: [],
-        } });
+        expect(JSON.parse(String(init.body))).toEqual({
+          description: "Chicken curry with rice",
+          occurredOn: localDate(),
+        });
+        expect(new Headers(init.headers).get("Idempotency-Key")).toBeTruthy();
+        return queuedResponse;
       }
       if (url.endsWith("/api/nutrition/photos"))
         return new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } });
@@ -83,13 +76,58 @@ describe("nutrition mobile workflow", () => {
     fireEvent.change(title, { target: { value: "Chicken curry with rice" } });
     fireEvent.click(screen.getByRole("button", { name: /estimate from description/i }));
 
-    await waitFor(() => expect((screen.getByLabelText("Food") as HTMLInputElement).value).toBe("Chicken curry and rice"));
-    const numeric = within(screen.getByLabelText("Food").closest("fieldset")!).getAllByRole("spinbutton");
-    expect(numeric.map((input) => (input as HTMLInputElement).value)).toEqual([
-      "450", "680", "42", "24", "72", "6",
-    ]);
-    fireEvent.change(numeric[0], { target: { value: "500" } });
-    expect((numeric[0] as HTMLInputElement).value).toBe("500");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText("Chicken curry with rice")).toBeTruthy();
+    expect(screen.getByText("Analysis in progress")).toBeTruthy();
+
+    resolveQueued(Response.json({
+      analysisId: "text-analysis-1",
+      status: "processing",
+      sourceKind: "text",
+      description: "Chicken curry with rice",
+      occurredOn: localDate(),
+      createdAt: new Date().toISOString(),
+      thumbnailUrl: null,
+    }, { status: 202 }));
+    await waitFor(() => expect(screen.getByText("Chicken curry with rice")).toBeTruthy());
+  });
+
+  it("shows a failed text recognition in red and lets it be queued again", async () => {
+    const failedJob = {
+      analysisId: "text-analysis-failed",
+      status: "manual_required",
+      sourceKind: "text",
+      description: "150 g fish and an egg",
+      occurredOn: localDate(),
+      createdAt: new Date().toISOString(),
+      failureCode: "timeout",
+      message: "Text analysis timed out",
+      retryable: true,
+      thumbnailUrl: null,
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/nutrition/photos/analyze/text-analysis-failed/retry") && init?.method === "POST")
+        return Response.json({ ...failedJob, status: "processing", failureCode: undefined }, { status: 202 });
+      if (url.endsWith("/api/nutrition/photos"))
+        return Response.json([failedJob]);
+      return new Response("{}", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { container } = render(<Nutrition />);
+    await screen.findByText("150 g fish and an egg");
+    expect(container.querySelector(".nutrition-analysis-card.manual_required")).toBeTruthy();
+    expect(container.querySelector(".nutrition-failed-indicator")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /150 g fish and an egg/i }));
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/nutrition/photos/analyze/text-analysis-failed/retry",
+      expect.objectContaining({ method: "POST" }),
+    ));
+    expect(screen.getByText("Analysis in progress")).toBeTruthy();
   });
 
   it("includes today's completed photo estimates on the home dashboard", async () => {

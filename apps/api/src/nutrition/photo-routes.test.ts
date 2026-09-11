@@ -105,12 +105,29 @@ describe("private nutrition photo routes", () => {
         "Content-Type": "application/json",
         "Accept-Language": "ru",
         "x-test-owner": "owner-a",
+        "Idempotency-Key": "text-request-1001",
       },
-      body: JSON.stringify({ description: "250 граммов курицы с рисом" }),
+      body: JSON.stringify({
+        description: "250 граммов курицы с рисом",
+        occurredOn: "2026-09-10",
+      }),
     });
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
+    expect(response.status).toBe(202);
+    const queued: any = await response.json();
+    expect(queued).toMatchObject({
+      status: "processing",
+      sourceKind: "text",
+      description: "250 граммов курицы с рисом",
+      occurredOn: "2026-09-10",
+      thumbnailUrl: null,
+    });
+    const completed = await waitForJob(url, queued.analysisId, {
+      "x-test-owner": "owner-a",
+    });
+    expect(completed).toMatchObject({
+      status: "completed",
+      sourceKind: "text",
       analysis: { summary: mealAnalysisV1Fixtures[1].summary },
       metadata: { provider: "fixture" },
     });
@@ -119,6 +136,72 @@ describe("private nutrition photo routes", () => {
       undefined,
       "ru",
     );
+  });
+
+  it("keeps a failed text job and retries it in the background", async () => {
+    const analyzeText = vi.fn()
+      .mockRejectedValueOnce(new MealAnalysisProviderError(
+        "timeout",
+        "Text analysis timed out",
+        true,
+      ))
+      .mockResolvedValueOnce({
+        analysis: mealAnalysisV1Fixtures[1],
+        metadata: {
+          provider: "fixture",
+          model: "fixture-v1",
+          schemaVersion: "meal-photo-v1",
+          latencyMs: 1,
+          inputTokens: null,
+          outputTokens: null,
+          estimatedCostUsd: null,
+        },
+      });
+    const url = await testServer({ analyze: vi.fn(), analyzeText });
+    const queuedResponse = await fetch(`${url}/api/nutrition/photos/analyze-text`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept-Language": "de",
+        "x-test-owner": "owner-a",
+        "Idempotency-Key": "text-request-1002",
+      },
+      body: JSON.stringify({ description: "Fisch und Ei", occurredOn: "2026-09-10" }),
+    });
+    const queued: any = await queuedResponse.json();
+    const failed = await waitForJob(url, queued.analysisId, {
+      "x-test-owner": "owner-a",
+    });
+    expect(failed).toMatchObject({
+      status: "manual_required",
+      sourceKind: "text",
+      description: "Fisch und Ei",
+      failureCode: "timeout",
+      retryable: true,
+    });
+
+    const retryResponse = await fetch(
+      `${url}/api/nutrition/photos/analyze/${queued.analysisId}/retry`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept-Language": "de",
+          "x-test-owner": "owner-a",
+        },
+        body: "{}",
+      },
+    );
+    expect(retryResponse.status).toBe(202);
+    const completed = await waitForJob(url, queued.analysisId, {
+      "x-test-owner": "owner-a",
+    });
+    expect(completed).toMatchObject({
+      status: "completed",
+      sourceKind: "text",
+      analysis: { summary: mealAnalysisV1Fixtures[1].summary },
+    });
+    expect(analyzeText).toHaveBeenCalledTimes(2);
   });
 
   it("analyzes once, ignores claimed MIME/extension and ownership-protects bytes", async () => {
