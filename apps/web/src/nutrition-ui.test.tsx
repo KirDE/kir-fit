@@ -373,7 +373,7 @@ describe("nutrition mobile workflow", () => {
             assumptions: [],
             clarificationQuestions: [{
               id: "extra",
-              question: "Another detail?",
+              question: "**Required:** Another detail?",
               options: ["Yes", "No"],
             }],
           },
@@ -398,13 +398,15 @@ describe("nutrition mobile workflow", () => {
     expect(within(details).getByText("Another detail?")).toBeTruthy();
     expect(screen.queryByText(/review estimate/i)).toBeNull();
     fireEvent.click(within(details).getByText("Optional questions"));
+    expect(within(details).queryByText(/required/i)).toBeNull();
+    fireEvent.click(within(details).getByLabelText("Yes"));
     fireEvent.change(within(details).getByLabelText("Comment"), {
-      target: { value: "The sauce was served separately" },
+      target: { value: "   " },
     });
     fireEvent.click(within(details).getByRole("button", { name: /update estimate/i }));
     await waitFor(() => expect(clarificationQueued).toBe(true));
     expect(clarificationAnswers).toEqual({
-      additional_context: "The sauce was served separately",
+      extra: "Yes",
     });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });

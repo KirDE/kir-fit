@@ -371,7 +371,8 @@ List each visible component and give ranges for portion and every nutrient. Do n
 ingredients. Explicitly surface unknown oil, sauce, sugar, cream, cheese, cooking method and portion
 scale. Any uncertainty likely to change calories or protein by 15% or more is material and must have
 a short targeted clarification question. Ask at most four distinct questions and combine related
-unknowns instead of repeating them. Mark the question required. If the image is not food or is
+unknowns instead of repeating them. Questions are optional in the UI: set required=false and never
+prefix question text with "Required" or an equivalent label. If the image is not food or is
 not recognizable, set isRecognizable=false and ask the user to identify it. Use web search when
 visible packaging, a brand, a product label, a restaurant item, or an unfamiliar named dish could
 materially improve identification or nutrition estimates. Do not search for generic recognizable
@@ -384,7 +385,8 @@ most 60 characters. List the foods and portions implied by the description, with
 portion and nutrient. Do not invent ingredients that are not stated or normally intrinsic to the
 named dish. Explicitly surface unknown oil, sauce, sugar, cream, cheese, cooking method and portion
 scale. Any uncertainty likely to change calories or protein by 15% or more is material and must have
-a short targeted clarification question. Ask at most four distinct questions. Use web search when a
+a short targeted clarification question. Ask at most four distinct questions. Questions are optional
+in the UI: set required=false and never prefix question text with "Required" or an equivalent label. Use web search when a
 brand, packaged product, restaurant item or unfamiliar named dish could materially improve the
 estimate; do not search for generic foods. Treat search results as supporting evidence. Do not give
 medical advice.`;

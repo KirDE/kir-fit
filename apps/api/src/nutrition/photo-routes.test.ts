@@ -334,7 +334,10 @@ describe("private nutrition photo routes", () => {
           "Idempotency-Key": "clarify-1003",
         },
         body: JSON.stringify({
-          answers: { preparation_detail: "olive oil and vinegar" },
+          answers: {
+            preparation_detail: "olive oil and vinegar",
+            additional_context: "",
+          },
           priorAnalysis: { summary: "client attempted replacement" },
         }),
       });

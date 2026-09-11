@@ -38,6 +38,7 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
     limit: Number(process.env.NUTRITION_AI_RATE_LIMIT || 10),
     standardHeaders: "draft-8",
     legacyHeaders: false,
+    skipFailedRequests: true,
     message: {
       status: "manual_required",
       reasonCode: "rate_limited",
@@ -51,6 +52,7 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
     keyGenerator: (request) => options.ownerId(request),
     standardHeaders: "draft-8",
     legacyHeaders: false,
+    skipFailedRequests: true,
     message: {
       status: "manual_required",
       reasonCode: "rate_limited",
@@ -274,18 +276,28 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
           error: "A valid Idempotency-Key header is required",
           code: "invalid_idempotency_key",
         });
-      const { answers } = z
+      const { answers: rawAnswers } = z
         .strictObject({
-          answers: z.record(z.string().max(64), z.string().trim().min(1).max(500)),
+          answers: z.record(z.string().max(64), z.string().trim().max(500)),
           // Accepted only for rolling UI compatibility. The trusted prior result
           // is always loaded from the owner-protected server manifest.
           priorAnalysis: z.unknown().optional(),
           clarificationRound: z.number().int().min(0).max(2).optional(),
         })
         .parse(request.body);
-      if (Object.keys(answers).length === 0 || Object.keys(answers).length > 12)
+      if (Object.keys(rawAnswers).length > 12)
         return response.status(400).json({
-          error: "Between 1 and 12 clarification answers are required",
+          error: "No more than 12 clarification answers are allowed",
+          code: "invalid_answers",
+        });
+      const answers = Object.fromEntries(
+        Object.entries(rawAnswers)
+          .map(([key, value]) => [key, value.trim()] as const)
+          .filter(([, value]) => value.length > 0),
+      );
+      if (Object.keys(answers).length === 0)
+        return response.status(400).json({
+          error: "At least one clarification answer is required",
           code: "invalid_answers",
         });
       const manifest = await store.requireOwned(analysisId, ownerId);

@@ -322,6 +322,11 @@ const boundedAiText = (value: unknown, fallback: string, maxLength: number) => {
   return (text || fallback).slice(0, maxLength).trim();
 };
 
+const plainQuestionText = (value: unknown) =>
+  boundedAiText(value, "Question", 300)
+    .replace(/\*\*/gu, "")
+    .replace(/^\s*(?:обязательно|required|erforderlich)\s*:\s*/iu, "");
+
 const MAX_MEAL_TITLE_LENGTH = 72;
 const photoDescriptionPrefix = /^(?:на (?:этом )?(?:фото|фотографии|изображении)\s+(?:изображ(?:е|ё)н(?:а|о|ы)?|вид(?:ен|на|но|ны))|(?:this |the )?(?:photo|image)\s+(?:shows|depicts)|(?:auf (?:dem|diesem) foto (?:ist|sind)|das foto zeigt))(?=[\s,:-]|$)[\s,:-]*/iu;
 
@@ -374,7 +379,7 @@ export const normalizeMealAnalysis = (raw: MealAnalysis | any): MealAnalysis => 
     questions: (value.questions || value.clarificationQuestions || []).map(
       (question: any) => ({
         id: question.id || crypto.randomUUID(),
-        text: question.text || question.question,
+        text: plainQuestionText(question.text || question.question),
         choices: question.choices || question.options || [],
         allowFreeText: true,
       }),
@@ -889,7 +894,11 @@ function OptionalQuestions({ analysis, onQueued }: {
       setBusy(true);
       setError("");
       try {
-        await clarifyMeal(analysis, answers);
+        await clarifyMeal(analysis, Object.fromEntries(
+          Object.entries(answers)
+            .map(([key, value]) => [key, value.trim()] as const)
+            .filter(([, value]) => value.length > 0),
+        ));
         onQueued();
       } catch {
         setError(nt("analysisFailed"));
