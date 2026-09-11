@@ -289,7 +289,7 @@ describe("private nutrition photo routes", () => {
   it("refines the trusted stored result and makes clarification retries idempotent", async () => {
     const refined = { ...structuredClone(mealAnalysisV1Fixtures[0]), summary: "Salad with oil dressing" };
     const refine = vi.fn(async (prior) => {
-      expect(prior.summary).toBe("Mixed salad");
+      expect(["Mixed salad", "Salad with oil dressing"]).toContain(prior.summary);
       return {
         analysis: refined,
         metadata: {
@@ -351,6 +351,22 @@ describe("private nutrition photo routes", () => {
     });
     expect((await clarify()).status).toBe(200);
     expect(refine).toHaveBeenCalledTimes(1);
+
+    const laterCorrection = await fetch(
+      `${url}/api/nutrition/photos/analyze/${original.analysisId}/clarify`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-test-owner": "owner-a",
+          "Idempotency-Key": "clarify-1003-later",
+        },
+        body: JSON.stringify({ answers: { additional_context: "The portion was smaller" } }),
+      },
+    );
+    expect(laterCorrection.status).toBe(202);
+    await waitForJob(url, original.analysisId, { "x-test-owner": "owner-a" });
+    expect(refine).toHaveBeenCalledTimes(2);
   });
 
   it("keeps the prior estimate and records the provider error when async clarification fails", async () => {

@@ -32,12 +32,14 @@ services:
       OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-gpt-4.1-mini}
       NUTRITION_AI_RATE_LIMIT: ${NUTRITION_AI_RATE_LIMIT:-10}
       NUTRITION_PRIVATE_DIR: /app/private/nutrition
+      NUTRITION_ANALYSIS_LOG: /app/logs/nutrition-analysis.jsonl
       APP_VERSION: ${APP_VERSION:-local}
       UPLOAD_DIR: /app/uploads
       PORT: 3000
     volumes:
       - uploads:/app/uploads
       - nutrition_private:/app/private/nutrition
+      - analysis_logs:/app/logs
     ports:
       - "127.0.0.1:${APP_PORT:-3210}:3000"
     networks: [internal]
@@ -57,6 +59,7 @@ volumes:
   postgres_data:
   uploads:
   nutrition_private:
+  analysis_logs:
 networks:
   internal:
     ipam:

@@ -13,6 +13,7 @@ import {
   MealAnalysisProvider,
   MealAnalysisProviderError,
 } from "./meal-analysis.js";
+import { writeNutritionAnalysisLog } from "./analysis-log.js";
 
 type NutritionPhotoRouterOptions = {
   ownerId: (request: express.Request) => string;
@@ -293,12 +294,6 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
       const refinementHash = hashIdempotency(ownerId, idempotencyKey);
       if (manifest.refinementIdempotencyHash === refinementHash)
         return response.json(publicManifest(manifest));
-      if (Number(manifest.providerMetadata?.clarificationRound ?? 0) >= 1)
-        return response.status(409).json({
-          status: "manual_required",
-          reasonCode: "clarification_limit_reached",
-          manualEntryAvailable: true,
-        });
       if (!manifest.result)
         return response.status(409).json({
           error: "No completed analysis is available to clarify",
@@ -368,6 +363,13 @@ async function runPendingTask(
 ) {
   const task = manifest.pendingTask;
   if (!task) return;
+  const startedAt = Date.now();
+  await writeNutritionAnalysisLog({
+    event: "nutrition_analysis_started",
+    analysisId: manifest.analysisId,
+    task: task.kind,
+    sourceKind: manifest.sourceKind || "photo",
+  }).catch(() => undefined);
   try {
     const result = task.kind === "analyze"
       ? await provider.analyze(
@@ -406,6 +408,17 @@ async function runPendingTask(
           ? task.refinementIdempotencyHash
           : manifest.refinementIdempotencyHash,
     });
+    await writeNutritionAnalysisLog({
+      event: "nutrition_analysis_completed",
+      analysisId: manifest.analysisId,
+      task: task.kind,
+      sourceKind: manifest.sourceKind || "photo",
+      durationMs: Date.now() - startedAt,
+      provider: result.metadata.provider,
+      model: result.metadata.model,
+      schemaVersion: result.metadata.schemaVersion,
+      webSearchUsed: result.metadata.webSearchUsed || false,
+    }).catch(() => undefined);
   } catch (error) {
     const providerError = error instanceof MealAnalysisProviderError;
     await store.update(manifest.analysisId, manifest.ownerId, {
@@ -417,14 +430,25 @@ async function runPendingTask(
       retryable: providerError ? error.retryable : true,
       pendingTask: undefined,
     });
-    console.error(JSON.stringify({
+    const failureEvent = {
       event: "nutrition_analysis_provider_failed",
       analysisId: manifest.analysisId,
       task: task.kind,
+      sourceKind: manifest.sourceKind || "photo",
+      durationMs: Date.now() - startedAt,
       failureCode: providerError ? error.code : "internal_error",
       retryable: providerError ? error.retryable : true,
       model: manifest.providerMetadata?.model,
-    }));
+      details: providerError ? error.details : undefined,
+    };
+    console.error(JSON.stringify(failureEvent));
+    await writeNutritionAnalysisLog(failureEvent).catch((logError) => {
+      console.error(JSON.stringify({
+        event: "nutrition_analysis_log_failed",
+        analysisId: manifest.analysisId,
+        error: logError instanceof Error ? logError.message : String(logError),
+      }));
+    });
   } finally {
     if (task.kind === "analyze") {
       // The bounded derivative is deleted after the provider finishes. The
