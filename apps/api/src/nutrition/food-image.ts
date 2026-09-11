@@ -18,7 +18,9 @@ export type PrivatePhotoManifest = {
   createdAt: string;
   occurredOn?: string;
   expiresAt: string;
-  sourceFormat: SupportedFoodImage;
+  sourceKind?: "photo" | "text";
+  description?: string;
+  sourceFormat?: SupportedFoodImage;
   analysisFile: string | null;
   thumbnailFile: string | null;
   status: "processing" | "completed" | "manual_required";
@@ -40,6 +42,11 @@ export type PrivatePhotoManifest = {
         language: "en" | "de" | "ru";
         answers: Record<string, string>;
         refinementIdempotencyHash: string;
+      }
+    | {
+        kind: "analyze_text";
+        language: "en" | "de" | "ru";
+        description: string;
       };
 };
 
@@ -199,6 +206,7 @@ export class PrivateFoodPhotoStore {
       createdAt: createdAt.toISOString(),
       occurredOn,
       expiresAt: new Date(createdAt.getTime() + retentionMs).toISOString(),
+      sourceKind: "photo",
       sourceFormat,
       analysisFile,
       thumbnailFile,
@@ -274,6 +282,35 @@ export class PrivateFoodPhotoStore {
         415,
       );
     }
+  }
+
+  async createText(
+    ownerId: string,
+    idempotencyKey: string,
+    description: string,
+    retentionMs = DEFAULT_PENDING_RETENTION_MS,
+    occurredOn?: string,
+  ) {
+    await this.initialize();
+    const analysisId = randomUUID();
+    const jobDirectory = this.jobDirectory(analysisId);
+    await fs.mkdir(jobDirectory, { mode: 0o700 });
+    const createdAt = new Date();
+    const manifest: PrivatePhotoManifest = {
+      analysisId,
+      ownerId,
+      idempotencyHash: hashIdempotency(ownerId, idempotencyKey),
+      createdAt: createdAt.toISOString(),
+      occurredOn,
+      expiresAt: new Date(createdAt.getTime() + retentionMs).toISOString(),
+      sourceKind: "text",
+      description,
+      analysisFile: null,
+      thumbnailFile: null,
+      status: "processing",
+    };
+    await writeJsonAtomic(path.join(jobDirectory, "manifest.json"), manifest);
+    return manifest;
   }
 
   async readManifest(analysisId: string): Promise<PrivatePhotoManifest> {

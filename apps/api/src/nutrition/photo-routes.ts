@@ -160,34 +160,85 @@ export function createNutritionPhotoRouter(options: NutritionPhotoRouterOptions)
     identityLimit,
     express.json({ limit: "8kb" }),
     asyncHandler(async (request, response) => {
-      const { description } = z.strictObject({
+      const ownerId = options.ownerId(request);
+      const idempotencyKey = request.header("Idempotency-Key") || "";
+      if (!idempotencyKeyPattern.test(idempotencyKey))
+        return response.status(400).json({
+          error: "A valid Idempotency-Key header is required",
+          code: "invalid_idempotency_key",
+        });
+      const { description, occurredOn } = z.strictObject({
         description: z.string().trim().min(2).max(500),
+        occurredOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       }).parse(request.body);
       if (!provider.analyzeText)
         return response.status(501).json({
           error: "Text meal analysis is not configured",
           code: "text_analysis_not_supported",
         });
-      try {
-        const result = await provider.analyzeText(
-          description,
-          undefined,
-          requestLanguage(request),
+      const existing = await store.findByIdempotencyKey(ownerId, idempotencyKey);
+      if (existing) {
+        if (existing.status === "processing") launch(existing);
+        return response.status(existing.status === "processing" ? 202 : 200).json(
+          publicManifest(existing),
         );
-        return response.json({ analysis: result.analysis, metadata: result.metadata });
-      } catch (error) {
-        if (!(error instanceof MealAnalysisProviderError)) throw error;
-        const status = error.code === "rate_limited" || error.code === "quota_exhausted"
-          ? 429
-          : error.code === "timeout" || error.code === "provider_unavailable"
-            ? 503
-            : 422;
-        return response.status(status).json({
-          error: error.message,
-          code: error.code,
-          retryable: error.retryable,
-        });
       }
+      const manifest = await store.createText(
+        ownerId,
+        idempotencyKey,
+        description,
+        undefined,
+        occurredOn,
+      );
+      const queued = await store.update(manifest.analysisId, ownerId, {
+        pendingTask: {
+          kind: "analyze_text",
+          language: requestLanguage(request),
+          description,
+        },
+      });
+      launch(queued);
+      return response.status(202).json(publicManifest(queued));
+    }),
+  );
+
+  router.post(
+    "/analyze/:analysisId/retry",
+    analysisLimit,
+    identityLimit,
+    express.json({ limit: "1kb" }),
+    asyncHandler(async (request, response) => {
+      const ownerId = options.ownerId(request);
+      const analysisId = firstParam(request.params.analysisId);
+      const manifest = await store.requireOwned(analysisId, ownerId);
+      if (manifest.sourceKind !== "text" || !manifest.description)
+        return response.status(409).json({
+          error: "Only text analysis can be retried here",
+          code: "retry_not_supported",
+        });
+      if (!provider.analyzeText)
+        return response.status(501).json({
+          error: "Text meal analysis is not configured",
+          code: "text_analysis_not_supported",
+        });
+      if (manifest.status === "completed") return response.json(publicManifest(manifest));
+      if (manifest.status === "processing") {
+        launch(manifest);
+        return response.status(202).json(publicManifest(manifest));
+      }
+      const queued = await store.update(analysisId, ownerId, {
+        status: "processing",
+        failureCode: undefined,
+        failureMessage: undefined,
+        retryable: undefined,
+        pendingTask: {
+          kind: "analyze_text",
+          language: requestLanguage(request),
+          description: manifest.description,
+        },
+      });
+      launch(queued);
+      return response.status(202).json(publicManifest(queued));
     }),
   );
 
@@ -324,6 +375,12 @@ async function runPendingTask(
           undefined,
           task.language,
         )
+      : task.kind === "analyze_text"
+        ? await provider.analyzeText!(
+            task.description,
+            undefined,
+            task.language,
+          )
       : await provider.refine!(
           manifest.result as any,
           task.answers,
@@ -393,6 +450,8 @@ function publicManifest(manifest: {
   retryable?: boolean;
   createdAt?: string;
   occurredOn?: string;
+  sourceKind?: "photo" | "text";
+  description?: string;
   pendingTask?: unknown;
   finalizedAt?: string;
 }) {
@@ -401,6 +460,8 @@ function publicManifest(manifest: {
     status: manifest.status,
     createdAt: manifest.createdAt,
     occurredOn: manifest.occurredOn,
+    sourceKind: manifest.sourceKind || "photo",
+    description: manifest.description,
     analysis: manifest.result,
     result: manifest.result,
     failureCode: manifest.failureCode,

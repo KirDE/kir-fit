@@ -175,21 +175,18 @@ export const analyzeMeal = (file: File, occurredOn: string) => {
   );
 };
 
-export async function analyzeMealText(description: string) {
-  const headers = analysisHeaders();
-  headers.set("Content-Type", "application/json");
-  const response = await fetch("/api/nutrition/photos/analyze-text", {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ description: description.trim() }),
-  });
-  if (!response.ok) {
-    const problem = await response.json().catch(() => ({}));
-    throw new Error(problem.error || "Text meal analysis unavailable");
-  }
-  const result = await response.json();
-  return result.analysis as unknown;
-}
+export const analyzeMealText = (description: string, occurredOn: string) =>
+  analysisRequest(
+    "/nutrition/photos/analyze-text",
+    JSON.stringify({ description: description.trim(), occurredOn }),
+    crypto.randomUUID(),
+  );
+
+export const retryMealText = (analysisId: string) =>
+  analysisRequest(
+    `/nutrition/photos/analyze/${encodeURIComponent(analysisId)}/retry`,
+    "{}",
+  );
 
 export const clarifyMeal = (
   analysis: MealAnalysis,
