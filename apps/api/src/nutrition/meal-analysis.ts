@@ -132,6 +132,7 @@ export class MealAnalysisProviderError extends Error {
       | "provider_unavailable",
     message: string,
     public readonly retryable: boolean,
+    public readonly details?: unknown,
   ) {
     super(message);
   }
@@ -427,7 +428,7 @@ export class OpenAiMealAnalysisProvider implements MealAnalysisProvider {
       [
         {
           type: "input_text",
-          text: `${localizedPrompt(language)}\nRevise the prior analysis using only the user's answers below. This is the only clarification round: set clarificationQuestions to an empty array after updating the estimate. Preserve ranges and assumptions for any uncertainty that remains.\nPrior analysis: ${JSON.stringify(prior)}\nUser answers: ${JSON.stringify(answers)}`,
+          text: `${localizedPrompt(language)}\nRevise the prior analysis using the user's latest corrections below. This may be a later correction after earlier questions were answered. Set clarificationQuestions to an empty array after updating the estimate. Preserve ranges and assumptions for any uncertainty that remains.\nPrior analysis: ${JSON.stringify(prior)}\nUser corrections: ${JSON.stringify(answers)}`,
         },
       ],
       signal,
@@ -564,11 +565,14 @@ export class OpenAiMealAnalysisProvider implements MealAnalysisProvider {
         let analysis: MealAnalysis;
         try {
           analysis = normalizeMealAnalysis(decoded);
-        } catch {
+        } catch (error) {
           throw new MealAnalysisProviderError(
             "malformed_response",
             "The analysis response did not match the required schema",
             false,
+            error instanceof z.ZodError
+              ? error.issues.map(({ path, code, message }) => ({ path, code, message }))
+              : undefined,
           );
         }
         if (sources.length) analysis.sources = sources;

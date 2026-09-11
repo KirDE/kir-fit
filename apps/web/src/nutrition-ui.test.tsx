@@ -25,6 +25,7 @@ describe("nutrition mobile workflow", () => {
     await screen.findByText("No food recorded for this day.");
     fireEvent.click(screen.getByRole("button", { name: /add food/i }));
     fireEvent.click(screen.getByRole("button", { name: /enter manually/i }));
+    expect(screen.queryByRole("combobox")).toBeNull();
 
     fireEvent.change(screen.getByLabelText("Meal name"), {
       target: { value: "Protein bowl" },
@@ -355,6 +356,7 @@ describe("nutrition mobile workflow", () => {
       if (url.endsWith("/api/nutrition/photos")) {
         return new Response(JSON.stringify([{
           analysisId: "analysis-final-review",
+          sourceKind: "text",
           status: "completed",
           createdAt: new Date().toISOString(),
           result: {
@@ -386,11 +388,13 @@ describe("nutrition mobile workflow", () => {
     const open = await screen.findByRole("button", {
       name: /final fish estimate.*ready.*optional questions/i,
     });
+    expect(open.querySelector(".lucide-utensils")).toBeTruthy();
     expect(within(open).getByLabelText("Optional questions")).toBeTruthy();
     expect(screen.getByText("30 / — g")).toBeTruthy();
     fireEvent.click(open);
     const details = await screen.findByRole("dialog");
     expect(within(details).getByRole("heading", { name: /meal details/i })).toBeTruthy();
+    expect(within(details).queryByRole("combobox")).toBeNull();
     expect(within(details).getByText("Another detail?")).toBeTruthy();
     expect(screen.queryByText(/review estimate/i)).toBeNull();
     fireEvent.click(within(details).getByText("Optional questions"));
@@ -403,6 +407,56 @@ describe("nutrition mobile workflow", () => {
       additional_context: "The sauce was served separately",
     });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("allows another free-text AI correction after questions were already answered", async () => {
+    let correctionAnswers: Record<string, string> = {};
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/clarify") && init?.method === "POST") {
+        correctionAnswers = JSON.parse(String(init.body)).answers;
+        return new Response(JSON.stringify({ analysisId: "analysis-correct-again", status: "processing" }), {
+          status: 202,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.endsWith("/api/nutrition/photos")) {
+        return new Response(JSON.stringify([{
+          analysisId: "analysis-correct-again",
+          sourceKind: "text",
+          status: "completed",
+          createdAt: new Date().toISOString(),
+          result: {
+            summary: "Fish and egg",
+            foods: [{
+              name: "Fish and egg",
+              portion: { estimatedGrams: 200 },
+              calories: { estimate: 265 },
+              proteinGrams: { estimate: 41 },
+              fatGrams: { estimate: 11 },
+              carbsGrams: { estimate: 1 },
+              fiberGrams: { estimate: 0 },
+            }],
+            assumptions: [],
+            clarificationQuestions: [],
+          },
+          metadata: { clarificationRound: 1 },
+          thumbnailUrl: null,
+        }]), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return new Response("{}", { status: 404 });
+    }));
+
+    render(<Nutrition />);
+    fireEvent.click(await screen.findByRole("button", { name: /fish and egg.*ready/i }));
+    const details = await screen.findByRole("dialog");
+    expect(within(details).queryByText("Optional questions")).toBeNull();
+    const correction = within(details).getByPlaceholderText("Describe what should be corrected or added");
+    fireEvent.change(correction, { target: { value: "It was 150 g of white fish and one egg" } });
+    fireEvent.click(within(details).getByRole("button", { name: "Correct with AI" }));
+    await waitFor(() => expect(correctionAnswers).toEqual({
+      additional_context: "It was 150 g of white fish and one egg",
+    }));
   });
 
   it("labels the selected day and keeps meals separated while navigating", async () => {

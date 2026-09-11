@@ -92,6 +92,8 @@ const copy = {
     answer: "Your answer",
     comment: "Comment",
     commentPlaceholder: "Add any details that may improve the estimate",
+    correction: "Correct with AI",
+    correctionPlaceholder: "Describe what should be corrected or added",
     continue: "Update estimate",
     editDirectly: "Edit manually",
     review: "Review meal",
@@ -174,6 +176,8 @@ const copy = {
     answer: "Deine Antwort",
     comment: "Kommentar",
     commentPlaceholder: "Weitere Details zur Verbesserung der Schätzung",
+    correction: "Mit KI korrigieren",
+    correctionPlaceholder: "Beschreibe, was korrigiert oder ergänzt werden soll",
     continue: "Schätzung aktualisieren",
     editDirectly: "Manuell bearbeiten",
     review: "Mahlzeit prüfen",
@@ -256,6 +260,8 @@ const copy = {
     answer: "Ваш ответ",
     comment: "Комментарий",
     commentPlaceholder: "Добавьте любые уточнения для более точной оценки",
+    correction: "Скорректировать с ИИ",
+    correctionPlaceholder: "Напишите, что нужно исправить или дополнить",
     continue: "Обновить оценку",
     editDirectly: "Исправить вручную",
     review: "Проверка блюда",
@@ -667,7 +673,11 @@ function PhotoAnalysisCard({ job, onOpen }: {
       {job.thumbnailUrl
         ? <PrivateThumbnail src={job.thumbnailUrl} />
         : <span className={`nutrition-entry-icon ${job.status === "manual_required" ? "nutrition-failed-indicator" : ""}`}>
-            {job.status === "manual_required" ? <CircleAlert /> : <Clock3 />}
+            {job.status === "manual_required"
+              ? <CircleAlert />
+              : job.sourceKind === "text" && job.status === "completed"
+                ? <Utensils />
+                : <Clock3 />}
           </span>}
       <span>
         <b>{normalized?.title || job.description || nt("processing")}</b>
@@ -765,7 +775,7 @@ function MealEditor({ value, job, date, onClose, onUpload, onQueued, onTextQueue
   const [items, setItems] = useState<NutritionItem[]>(initialItems);
   const baseItems = useRef(initialItems);
   const [title, setTitle] = useState(value?.title || initialAnalysis?.title || job?.description || "");
-  const [mealType, setMealType] = useState<NutritionEntry["mealType"]>(value?.mealType || "snack");
+  const mealType: NutritionEntry["mealType"] = value?.mealType || "snack";
   const [consumedPercent, setConsumedPercent] = useState(value?.consumedPercent ?? 100);
   const [error, setError] = useState(job?.status === "manual_required" && !initialAnalysis
     ? nt(job.sourceKind === "text" ? "textAnalysisFailed" : "analysisFailed")
@@ -805,7 +815,6 @@ function MealEditor({ value, job, date, onClose, onUpload, onQueued, onTextQueue
           <button className="nutrition-recognize-text" disabled={title.trim().length < 2} onClick={() => onTextQueued(title)}>
             <Sparkles /> {nt(job?.status === "manual_required" && job.sourceKind === "text" ? "retry" : "recognizeText")}
           </button>
-          <label>{nt("manual")}<select value={mealType} onChange={(event) => setMealType(event.target.value as NutritionEntry["mealType"])}>{(["breakfast", "lunch", "dinner", "snack"] as const).map(type => <option key={type} value={type}>{nt(type)}</option>)}</select></label>
         </>}
         <p className="nutrition-full-serving">{nt("fullServing")}</p>
         {items.map((item, index) => photoResult
@@ -821,9 +830,37 @@ function MealEditor({ value, job, date, onClose, onUpload, onQueued, onTextQueue
           try { await saveNutritionEntry({ id: value?.id, occurredAt, mealType, title: title.trim(), consumedPercent, items, ...full, thumbnailUrl: analysis?.thumbnailUrl || value?.thumbnailUrl, assumptions: analysis?.assumptions || value?.assumptions, uncertainty: analysis?.uncertainty || value?.uncertainty, originalAnalysis: value?.originalAnalysis || analysis }); if (!token() && analysis) await deletePhotoAnalysis(analysis.id).catch(() => undefined); onSaved(); }
           catch { setError(nt("saveFailed")); setSaving(false); }
         }}>{nt(photoResult ? "saveChanges" : "save")}</button>
+        {job && analysis && <AiCorrection analysis={analysis} onQueued={onQueued} />}
       </div>}
       {onDelete && <button className="nutrition-delete" onClick={onDelete}><Trash2 /> {nt("delete")}</button>}
     </div>
+  </div>;
+}
+
+function AiCorrection({ analysis, onQueued }: {
+  analysis: MealAnalysis;
+  onQueued: () => void;
+}) {
+  const [correction, setCorrection] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return <div className="nutrition-ai-correction">
+    <label>
+      <span>{nt("correction")}</span>
+      <textarea maxLength={500} placeholder={nt("correctionPlaceholder")} value={correction} onChange={(event) => setCorrection(event.target.value)} />
+    </label>
+    {error && <p className="nutrition-alert error">{error}</p>}
+    <button disabled={busy || correction.trim().length < 2} onClick={async () => {
+      setBusy(true);
+      setError("");
+      try {
+        await clarifyMeal(analysis, { additional_context: correction.trim() });
+        onQueued();
+      } catch {
+        setError(nt("analysisFailed"));
+        setBusy(false);
+      }
+    }}><Sparkles /> {nt("correction")}</button>
   </div>;
 }
 
