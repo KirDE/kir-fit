@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  Check,
   Dumbbell,
   Eye,
   EyeOff,
@@ -588,7 +589,7 @@ function Dashboard({
     </section>
   );
 }
-function Workout({ done }: { done: () => void }) {
+export function Workout({ done }: { done: () => void }) {
   const workoutMenuRef = useRef<HTMLDetailsElement>(null);
   const [s, setS] = useState<Session | null | undefined>(),
     [index, setIndex] = useState(0),
@@ -865,6 +866,15 @@ function Workout({ done }: { done: () => void }) {
             </button>
             <button type="button" onClick={() => setWorkoutAction("restart")}>
               <RotateCcw /> {tr("restartWorkout")}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                workoutMenuRef.current?.removeAttribute("open");
+                setFinishConfirmOpen(true);
+              }}
+            >
+              <Check /> {tr("finish")}
             </button>
             <button
               type="button"
@@ -2188,4 +2198,5 @@ function Empty({ text }: { text: string }) {
     </div>
   );
 }
-createRoot(document.getElementById("root")!).render(<App />);
+const rootElement = document.getElementById("root");
+if (rootElement) createRoot(rootElement).render(<App />);
