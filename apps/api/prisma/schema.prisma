@@ -101,6 +101,7 @@ model WorkoutTemplateExercise {
   increment       Decimal         @db.Decimal(6, 2)
   measurementUnit String          @default("kg")
   customName      String?
+  notes           String?
   lastWeight      Decimal?        @db.Decimal(6, 2)
   lastReps        Int?
   lastRir         Int?
@@ -161,6 +162,7 @@ model WorkoutExercise {
   increment               Decimal        @default(2.5) @db.Decimal(6, 2)
   measurementUnit         String         @default("kg")
   customName              String?
+  notes                   String?
   lastWeight              Decimal?       @db.Decimal(6, 2)
   lastReps                Int?
   lastRir                 Int?
