@@ -156,6 +156,7 @@ type State = {
       increment?: number;
       measurementUnit: "kg" | "units";
       customName?: string | null;
+      notes?: string | null;
       lastWeight?: number | null;
       lastReps?: number | null;
       lastRir?: number | null;
@@ -269,6 +270,7 @@ export async function guestApi(path: string, init: RequestInit = {}) {
           increment: settings?.increment ?? e.defaultIncrement,
           measurementUnit: settings?.measurementUnit || "kg",
           customName: settings?.customName || null,
+          notes: settings?.notes || null,
           lastWeight: settings?.lastWeight ?? null,
           lastReps: settings?.lastReps ?? null,
           lastRir: settings?.lastRir ?? null,
@@ -320,6 +322,7 @@ export async function guestApi(path: string, init: RequestInit = {}) {
     e.increment = settings.increment;
     e.measurementUnit = settings.measurementUnit;
     e.customName = settings.customName || null;
+    e.notes = settings.notes || null;
     state.exerciseSettings[e.exercise.id] = {
       ...state.exerciseSettings[e.exercise.id],
       plannedSets: settings.plannedSets,
@@ -327,6 +330,7 @@ export async function guestApi(path: string, init: RequestInit = {}) {
       increment: settings.increment,
       measurementUnit: settings.measurementUnit,
       customName: settings.customName || null,
+      notes: settings.notes || null,
     };
     save(state);
     return session(s);

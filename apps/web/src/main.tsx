@@ -796,6 +796,7 @@ export function Workout({ done }: { done: () => void }) {
     increment: number;
     measurementUnit: "kg" | "units";
     customName: string;
+    notes: string;
   }) => {
     if (!ex) return;
     const updated = await api(`/workouts/${s.id}/exercises/${ex.id}/settings`, {
@@ -1114,6 +1115,7 @@ function ExerciseCard({
     increment: number;
     measurementUnit: "kg" | "units";
     customName: string;
+    notes: string;
   }) => Promise<void>;
 }) {
   const [weight, setWeight] = useState<number | "">(
@@ -1133,6 +1135,7 @@ function ExerciseCard({
     [increment, setIncrement] = useState(ex.increment),
     [measurementUnit, setMeasurementUnit] = useState(ex.measurementUnit),
     [customName, setCustomName] = useState(ex.customName || ""),
+    [notes, setNotes] = useState(ex.notes || ""),
     [settingsBusy, setSettingsBusy] = useState(false),
     [selectedSet, setSelectedSet] = useState<any>();
   useEffect(() => {
@@ -1144,6 +1147,7 @@ function ExerciseCard({
     setIncrement(ex.increment);
     setMeasurementUnit(ex.measurementUnit);
     setCustomName(ex.customName || "");
+    setNotes(ex.notes || "");
     setSelectedSet(undefined);
   }, [ex.id]);
   return (
@@ -1205,6 +1209,7 @@ function ExerciseCard({
                   increment,
                   measurementUnit,
                   customName,
+                  notes,
                 });
                 setSettingsOpen(false);
               } finally {
@@ -1225,6 +1230,15 @@ function ExerciseCard({
                 maxLength={80}
                 placeholder={localizedName(ex.exercise)}
                 onChange={(event) => setCustomName(event.target.value)}
+              />
+            </label>
+            <label className="settings-name">
+              <span>{tr("machineNotes")}</span>
+              <textarea
+                value={notes}
+                maxLength={1000}
+                placeholder={tr("machineNotesPlaceholder")}
+                onChange={(event) => setNotes(event.target.value)}
               />
             </label>
             <NumberStep

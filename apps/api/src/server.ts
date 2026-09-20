@@ -776,6 +776,7 @@ app.post(
               increment: t.increment,
               measurementUnit: t.measurementUnit,
               customName: t.customName,
+              notes: t.notes,
               lastWeight: previous?.weight ?? null,
               lastReps: previous?.reps ?? null,
               lastRir: previous?.rir ?? null,
@@ -864,6 +865,12 @@ app.patch(
           .trim()
           .max(80)
           .transform((value) => value || null),
+        notes: z
+          .string()
+          .trim()
+          .max(1000)
+          .transform((value) => value || null)
+          .optional(),
       })
       .parse(req.body);
     const exercise = await prisma.workoutExercise.findFirstOrThrow({
@@ -892,6 +899,7 @@ app.patch(
           increment: new Prisma.Decimal(body.increment),
           measurementUnit: body.measurementUnit,
           customName: body.customName,
+          ...(body.notes === undefined ? {} : { notes: body.notes }),
         },
       }),
     ]);
