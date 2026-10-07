@@ -811,42 +811,83 @@ app.post(
         clientMutationId: z.string().uuid(),
       })
       .parse(req.body);
-    const ex = await prisma.workoutExercise.findFirstOrThrow({
-      where: {
-        id: body.workoutExerciseId,
-        sessionId: req.params.sessionId,
-        session: { userId: userId(req), status: "active" },
-      },
-      include: { session: true },
-    });
     const weight = new Prisma.Decimal(body.weight);
-    const [set] = await prisma.$transaction([
-      prisma.workoutSet.upsert({
-        where: { clientMutationId: body.clientMutationId },
-        update: {},
-        create: {
-          workoutExerciseId: ex.id,
-          setNumber: body.setNumber,
-          weight,
-          reps: body.reps,
-          rir: body.rir,
-          clientMutationId: body.clientMutationId,
-        },
-      }),
-      prisma.workoutExercise.update({
-        where: { id: ex.id },
-        data: { lastWeight: weight, lastReps: body.reps, lastRir: body.rir },
-      }),
-      prisma.workoutTemplateExercise.update({
-        where: {
-          templateId_exerciseId: {
-            templateId: ex.session.templateId,
-            exerciseId: ex.exerciseId,
+    const rir = body.rir ?? null;
+    const saveSet = () =>
+      prisma.$transaction(async (tx) => {
+        const ex = await tx.workoutExercise.findFirstOrThrow({
+          where: {
+            id: body.workoutExerciseId,
+            sessionId: req.params.sessionId,
+            session: { userId: userId(req), status: "active" },
           },
-        },
-        data: { lastWeight: weight, lastReps: body.reps, lastRir: body.rir },
-      }),
-    ]);
+          include: { session: true },
+        });
+        const existing =
+          (await tx.workoutSet.findUnique({
+            where: { clientMutationId: body.clientMutationId },
+          })) ??
+          (await tx.workoutSet.findUnique({
+            where: {
+              workoutExerciseId_setNumber: {
+                workoutExerciseId: ex.id,
+                setNumber: body.setNumber,
+              },
+            },
+          }));
+        if (existing) {
+          if (
+            existing.workoutExerciseId !== ex.id ||
+            existing.setNumber !== body.setNumber ||
+            !existing.weight.equals(weight) ||
+            existing.reps !== body.reps ||
+            (existing.rir ?? null) !== rir
+          ) {
+            throw Object.assign(
+              new Error("A set with different values already exists for this set number or mutation ID"),
+              { status: 409 },
+            );
+          }
+          // Keep the original mutation ID and avoid replaying old last-set values.
+          return existing;
+        }
+        const set = await tx.workoutSet.create({
+          data: {
+            workoutExerciseId: ex.id,
+            setNumber: body.setNumber,
+            weight,
+            reps: body.reps,
+            rir,
+            clientMutationId: body.clientMutationId,
+          },
+        });
+        await tx.workoutExercise.update({
+          where: { id: ex.id },
+          data: { lastWeight: weight, lastReps: body.reps, lastRir: rir },
+        });
+        await tx.workoutTemplateExercise.update({
+          where: {
+            templateId_exerciseId: {
+              templateId: ex.session.templateId,
+              exerciseId: ex.exerciseId,
+            },
+          },
+          data: { lastWeight: weight, lastReps: body.reps, lastRir: rir },
+        });
+        return set;
+      });
+    let set;
+    try {
+      set = await saveSet();
+    } catch (error) {
+      if (
+        !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+        error.code !== "P2002"
+      ) throw error;
+      // A concurrent insert can win either unique key. PostgreSQL aborts the
+      // failed transaction, so reconcile in a fresh transaction with auth checks.
+      set = await saveSet();
+    }
     res.status(201).json({ ...set, weight: num(set.weight) });
   }),
 );
