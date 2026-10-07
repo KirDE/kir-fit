@@ -28,21 +28,47 @@ export function discardWorkout(sessionId: string) {
     ),
   );
 }
-export async function flush(
-  sender: (p: string, i: RequestInit) => Promise<any>,
-) {
-  if (!navigator.onLine) return false;
-  const q = read();
-  for (const item of q) {
-    try {
-      await sender(item.path, item.init);
+type Sender = (p: string, i: RequestInit) => Promise<any>;
+const inFlight = new Map<string, Promise<boolean>>();
+
+function sendPending(item: Pending, sender: Sender) {
+  const existing = inFlight.get(item.id);
+  if (existing) return existing;
+  // Online sync and workout finish must await the same write. Remove it only
+  // after success, reading the latest queue to preserve newly queued writes.
+  const sending = Promise.resolve()
+    .then(() => sender(item.path, item.init))
+    .then(() => {
       localStorage.setItem(
         store,
         JSON.stringify(read().filter((x) => x.id !== item.id)),
       );
-    } catch {
-      return false;
-    }
+      return true;
+    })
+    .catch(() => false)
+    .finally(() => inFlight.delete(item.id));
+  inFlight.set(item.id, sending);
+  return sending;
+}
+
+async function flushMatching(sender: Sender, matches: (item: Pending) => boolean) {
+  const q = read().filter(matches);
+  if (!navigator.onLine) return q.length === 0;
+  for (const item of q) {
+    // Another flush may already have saved this snapshot entry.
+    if (!read().some((x) => x.id === item.id)) continue;
+    if (!(await sendPending(item, sender))) return false;
   }
-  return read().length === 0;
+  return !read().some(matches);
+}
+
+export function flush(sender: Sender) {
+  return flushMatching(sender, () => true);
+}
+
+export function flushWorkoutSets(sender: Sender, sessionId: string) {
+  return flushMatching(
+    sender,
+    (item) => item.path === `/workouts/${sessionId}/sets`,
+  );
 }

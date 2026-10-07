@@ -85,6 +85,8 @@ const en = {
   finishConfirm: "Finish this workout? You can resume it from today's history.",
   finishError:
     "The workout could not be finished. Check the connection and try again.",
+  finishUnsyncedSets:
+    "Some sets in this workout could not be synced. Your sets are saved on this device. Try finishing again.",
   resumeWorkout: "Resume workout",
   resumeError: "The workout could not be resumed.",
   deleteWorkout: "Delete workout",
@@ -230,6 +232,8 @@ const de: typeof en = {
     "Training beenden? Du kannst es heute im Verlauf wieder aufnehmen.",
   finishError:
     "Das Training konnte nicht beendet werden. Prüfe die Verbindung und versuche es erneut.",
+  finishUnsyncedSets:
+    "Einige Sätze dieses Trainings konnten nicht synchronisiert werden. Deine Sätze sind auf diesem Gerät gespeichert. Versuche erneut, das Training zu beenden.",
   resumeWorkout: "Training fortsetzen",
   resumeError: "Das Training konnte nicht fortgesetzt werden.",
   deleteWorkout: "Training löschen",
@@ -375,6 +379,8 @@ const ru: typeof en = {
     "Завершить тренировку? Сегодня её можно будет возобновить из истории.",
   finishError:
     "Не удалось завершить тренировку. Проверьте соединение и попробуйте ещё раз.",
+  finishUnsyncedSets:
+    "Не удалось синхронизировать некоторые подходы этой тренировки. Подходы сохранены на этом устройстве. Попробуйте завершить тренировку ещё раз.",
   resumeWorkout: "Возобновить тренировку",
   resumeError: "Не удалось возобновить тренировку.",
   deleteWorkout: "Удалить тренировку",

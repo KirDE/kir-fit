@@ -37,6 +37,7 @@ import {
   discardWorkout,
   discardWorkoutFinishes,
   flush,
+  flushWorkoutSets,
   queue,
   remainingRestSeconds,
   type RestTimerState,
@@ -725,7 +726,11 @@ export function Workout({ done }: { done: () => void }) {
     const path = `/workouts/${s.id}/finish`;
     const init = { method: "POST", body: "{}" };
     try {
-      if (!isGuest() && !(await flush(api))) throw new Error("pending sets");
+      if (!isGuest() && !(await flushWorkoutSets(api, s.id))) {
+        setFinishError(tr("finishUnsyncedSets"));
+        setFinishing(false);
+        return;
+      }
       await api(path, init);
       clearRest();
       done();
