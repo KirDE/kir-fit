@@ -64,6 +64,17 @@ Production uses `/opt/kir-fit/repo`, a root-owned `.env`, Docker Compose for the
 
 ## Reliability notes
 
+- Docker and PostgreSQL are enabled at boot; the application uses Docker's
+  `unless-stopped` restart policy. `deploy/install-boot-order.sh` installs a
+  systemd drop-in ordering the Plesk PostgreSQL 13/main cluster after Docker.
+  PostgreSQL binds to `172.29.21.1`, which only exists after Docker restores the
+  Compose bridge. Without this ordering PostgreSQL can start on localhost only
+  and Fit will repeatedly fail with Prisma `P1001`. The installer is idempotent
+  and runs on each deployment, without restarting the shared database. For an
+  existing affected boot, install it and restart `postgresql@13-main.service`
+  once, then restart only the Fit app; this briefly reconnects other users of
+  the shared cluster. Verify `172.29.21.1:5432` is listening and the public
+  `/api/health` returns HTTP 200. Do not expose PostgreSQL on all interfaces.
 - Every session and set mutation has a client UUID, making retries idempotent.
 - The active session is restored on reload.
 - Failed set writes are queued locally and synchronized after reconnect. Authenticated API responses are never placed in the shared service-worker cache.

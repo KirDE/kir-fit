@@ -9,6 +9,7 @@ cd "$repo_dir"
 git fetch --prune origin main
 git checkout -f main
 git reset --hard origin/main
+bash "$repo_dir/deploy/install-boot-order.sh"
 export APP_VERSION="$(git rev-parse --short HEAD)"
 docker compose build --pull app seed
 docker compose run --rm seed
