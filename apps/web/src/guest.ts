@@ -1,10 +1,11 @@
+import catalog from "../../api/prisma/exercise-catalog.json";
 const STORAGE = "kirfit_guest_data_v1";
 const copy = (x: any) => structuredClone(x);
 const exercises = [
   [
     "leg-press",
-    "Leg Press",
-    "Beinpresse",
+    "Seated Leg Press",
+    "Beinpresse sitzend",
     "A seated machine with a weighted platform pushed away with both legs.",
     "Sitzende Maschine mit einer Gewichtsplattform, die mit beiden Beinen weggedrückt wird.",
     3,
@@ -51,8 +52,8 @@ const exercises = [
   ],
   [
     "leg-curl",
-    "Leg Curl",
-    "Beinbeuger",
+    "Seated Leg Curl",
+    "Beinbeuger sitzend",
     "A machine where the knees bend against a padded lever.",
     "Maschine, bei der die Knie gegen eine gepolsterte Rolle gebeugt werden.",
     2,
@@ -75,10 +76,10 @@ const exercises = [
   ],
   [
     "triceps-pushdown",
-    "Triceps Pushdown",
-    "Trizeps am Kabel",
-    "A cable station where a bar or rope is pushed down.",
-    "Kabelstation, an der Stange oder Seil nach unten gedrückt werden.",
+    "Triceps Press",
+    "Trizepsdrücken",
+    "A seated machine with handles pressed down to extend the elbows.",
+    "Sitzende Maschine, deren Griffe zum Strecken der Ellbogen nach unten gedrückt werden.",
     2,
     10,
     15,
@@ -103,13 +104,13 @@ const exercises = [
   nameDe: x[2],
   nameRu: (
     {
-      "leg-press": "Жим ногами",
+      "leg-press": "Жим ногами сидя",
       "chest-press": "Жим от груди",
       "lat-pulldown": "Тяга верхнего блока",
       "seated-row": "Горизонтальная тяга",
-      "leg-curl": "Сгибание ног",
+      "leg-curl": "Сгибание ног сидя",
       "shoulder-press": "Жим на плечи",
-      "triceps-pushdown": "Разгибание рук на блоке",
+      "triceps-pushdown": "Жим на трицепс",
       "biceps-curl": "Сгибание рук на бицепс",
     } as Record<string, string>
   )[x[0]],
@@ -126,7 +127,7 @@ const exercises = [
       "seated-row": "Сидячий тренажёр, ручки которого тянут к корпусу.",
       "leg-curl": "Тренажёр, где ноги сгибаются против мягкого валика.",
       "shoulder-press": "Сидячий тренажёр, в котором ручки выжимаются вверх.",
-      "triceps-pushdown": "Блочный тренажёр для разгибания рук вниз.",
+      "triceps-pushdown": "Сидячий тренажёр для жима рукоятей вниз.",
       "biceps-curl": "Тренажёр для сгибания рук к плечам.",
     } as Record<string, string>
   )[x[0]],
@@ -135,7 +136,7 @@ const exercises = [
     "Kontrollierten Bewegungsumfang verwenden und den Körper stabil halten.",
   instructionsRu:
     "Выполняйте движение подконтрольно и сохраняйте устойчивое положение тела.",
-  targetMuscles: [],
+  targetMuscles: [] as string[],
   defaultSets: x[5],
   minReps: x[6],
   maxReps: x[7],
@@ -144,7 +145,14 @@ const exercises = [
   images: [{ path: `/exercise-images/${x[0]}.webp` }],
   machines: [],
 }));
+exercises.push(...catalog.optionalExercises.map((entry) => ({
+  ...entry, images: [{ path: `/exercise-images/${entry.id}.webp` }], machines: [],
+})));
+
+type GuestPlan = { id: string; name: string; exercises: any[] };
 type State = {
+  templates: GuestPlan[];
+  assignments: { weekday: number; templateId: string }[];
   sessions: any[];
   weights: any[];
   preferredWeekdays: number[];
@@ -163,7 +171,20 @@ type State = {
     }
   >;
 };
+const defaultPlan = (settings: State["exerciseSettings"] = {}): GuestPlan => ({
+  id: "guest-full-body", name: "Default",
+  exercises: exercises.filter((entry) => catalog.starterExerciseIds.includes(entry.id)).map((entry) => ({
+    exerciseId: entry.id, customized: !!settings[entry.id], sets: settings[entry.id]?.plannedSets ?? entry.defaultSets,
+    minReps: entry.minReps, maxReps: entry.maxReps,
+    restSeconds: settings[entry.id]?.restSeconds ?? entry.defaultRestSeconds,
+    increment: settings[entry.id]?.increment ?? entry.defaultIncrement,
+    measurementUnit: settings[entry.id]?.measurementUnit || "kg",
+    customName: settings[entry.id]?.customName || null, notes: settings[entry.id]?.notes || null,
+  })),
+});
 const fresh = (): State => ({
+  templates: [defaultPlan()],
+  assignments: [0, 3, 5].map((weekday) => ({ weekday, templateId: "guest-full-body" })),
   sessions: [],
   weights: [],
   preferredWeekdays: [0, 3, 5],
@@ -178,6 +199,17 @@ const load = (): State => {
     );
     stored.preferredWeekdays ||= [0, 3, 5];
     stored.exerciseSettings ||= {};
+    if (!stored.templates) {
+      stored.templates = [defaultPlan(stored.exerciseSettings)];
+      stored.assignments = stored.preferredWeekdays.map((weekday: number) => ({ weekday, templateId: "guest-full-body" }));
+      // Persist the one-time migration without rewriting any sets or measurements.
+      for (const active of stored.sessions || []) {
+        active.templateId ||= "guest-full-body";
+        active.template ||= { id: active.templateId, name: "Default" };
+      }
+      localStorage.setItem(STORAGE, JSON.stringify(stored));
+    }
+    stored.assignments ||= stored.preferredWeekdays.map((weekday: number) => ({ weekday, templateId: stored.templates[0].id }));
     return stored;
   } catch {
     return fresh();
@@ -207,6 +239,10 @@ const session = (s: any) => ({
   summary: summary(s),
   exercises: s.exercises.map((e: any) => ({
     ...e,
+    exercise: (() => {
+      const current = exercises.find((entry) => entry.id === e.exercise.id);
+      return current ? { ...e.exercise, nameEn: current.nameEn, nameDe: current.nameDe, nameRu: current.nameRu, images: current.images } : e.exercise;
+    })(),
     increment: e.increment ?? e.exercise.defaultIncrement ?? 2.5,
     measurementUnit: e.measurementUnit || "kg",
     suggestIncrease:
@@ -222,12 +258,21 @@ export async function guestApi(path: string, init: RequestInit = {}) {
   const state = load();
   const method = init.method || "GET";
   if (path === "/exercises") return copy(exercises);
+  if (path === "/exercises/history") {
+    const recorded = new Set(state.sessions.filter((item) => item.status === "completed")
+      .flatMap((item) => item.exercises.filter((entry: any) => entry.sets.length > 0).map((entry: any) => entry.exercise.id)));
+    return copy(exercises.filter((entry) => recorded.has(entry.id)).sort((a,b) => a.nameEn.localeCompare(b.nameEn)));
+  }
   if (path === "/dashboard") {
     const last = state.sessions.filter((s) => s.status === "completed").at(-1);
     const current = state.weights.at(-1)?.weight;
     return {
       nextWorkout: nextDay(state.preferredWeekdays),
-      template: { id: "guest-full-body", name: "Full Body" },
+      template: (() => {
+        const day = new Date(nextDay(state.preferredWeekdays)).getDay();
+        const template = state.templates.find((item) => item.id === state.assignments.find((entry) => entry.weekday === day)?.templateId) || state.templates[0];
+        return { id: template.id, name: template.name, exerciseCount: template.exercises.length };
+      })(),
       last: last ? summary(last) : null,
       currentWeight: current,
       weightChange: null,
@@ -242,19 +287,24 @@ export async function guestApi(path: string, init: RequestInit = {}) {
     const old = state.sessions.find((s) => s.status === "active");
     if (old) return session(old);
     const intro = body(init).introWeeks;
+    const scheduledDay = new Date(nextDay(state.preferredWeekdays)).getDay();
+    const templateId = body(init).templateId || state.assignments.find((entry) => entry.weekday === scheduledDay)?.templateId || state.templates[0].id;
+    const template = state.templates.find((entry) => entry.id === templateId);
+    if (!template) throw new Error("Workout not found");
     const s = {
+      templateId: template.id, template: { id: template.id, name: template.name },
       id: crypto.randomUUID(),
       startedAt: new Date().toISOString(),
       status: "active",
-      exercises: exercises.map((e: any, i) => {
+      exercises: template.exercises.map((config: any, i: number) => {
+        const e = exercises.find((entry) => entry.id === config.exerciseId)!;
         const settings = state.exerciseSettings[e.id];
         return {
           id: crypto.randomUUID(),
           exercise: copy(e),
           sortOrder: i + 1,
           plannedSets:
-            settings?.plannedSets ??
-            (intro &&
+            config.customized ? config.sets : (intro &&
             [
               "leg-press",
               "chest-press",
@@ -262,15 +312,15 @@ export async function guestApi(path: string, init: RequestInit = {}) {
               "seated-row",
               "shoulder-press",
             ].includes(e.id)
-              ? Math.min(2, e.defaultSets)
-              : e.defaultSets),
-          minReps: e.minReps,
-          maxReps: e.maxReps,
-          restSeconds: settings?.restSeconds ?? e.defaultRestSeconds,
-          increment: settings?.increment ?? e.defaultIncrement,
-          measurementUnit: settings?.measurementUnit || "kg",
-          customName: settings?.customName || null,
-          notes: settings?.notes || null,
+              ? Math.min(2, config.sets)
+              : config.sets),
+          minReps: config.minReps,
+          maxReps: config.maxReps,
+          restSeconds: config.restSeconds,
+          increment: config.increment,
+          measurementUnit: config.measurementUnit || "kg",
+          customName: config.customName || null,
+          notes: config.notes || null,
           lastWeight: settings?.lastWeight ?? null,
           lastReps: settings?.lastReps ?? null,
           lastRir: settings?.lastRir ?? null,
@@ -281,6 +331,30 @@ export async function guestApi(path: string, init: RequestInit = {}) {
     state.sessions.push(s);
     save(state);
     return session(s);
+  }
+  const addMatch = path.match(/^\/workouts\/([^/]+)\/exercises$/);
+  if (addMatch && method === "POST") {
+    const active = state.sessions.find((item) => item.id === addMatch[1] && item.status === "active");
+    if (!active) throw new Error("Active workout not found");
+    const entry = exercises.find((item) => item.id === body(init).exerciseId);
+    if (!entry) throw new Error("Exercise not found");
+    if (!active.exercises.some((item: any) => item.exercise.id === entry.id)) {
+      const settings = state.exerciseSettings[entry.id];
+      active.exercises.push({
+        id: crypto.randomUUID(), exercise: copy(entry),
+        sortOrder: Math.max(0, ...active.exercises.map((item: any) => item.sortOrder || 0)) + 1,
+        plannedSets: settings?.plannedSets ?? entry.defaultSets,
+        minReps: entry.minReps, maxReps: entry.maxReps,
+        restSeconds: settings?.restSeconds ?? entry.defaultRestSeconds,
+        increment: settings?.increment ?? entry.defaultIncrement,
+        measurementUnit: settings?.measurementUnit || "kg",
+        customName: settings?.customName || null, notes: settings?.notes || null,
+        lastWeight: settings?.lastWeight ?? null, lastReps: settings?.lastReps ?? null,
+        lastRir: settings?.lastRir ?? null, sets: [],
+      });
+      save(state);
+    }
+    return session(active);
   }
   let m = path.match(/^\/workouts\/([^/]+)\/sets$/);
   if (m && method === "POST") {
@@ -323,6 +397,12 @@ export async function guestApi(path: string, init: RequestInit = {}) {
     e.measurementUnit = settings.measurementUnit;
     e.customName = settings.customName || null;
     e.notes = settings.notes || null;
+    const config = state.templates.find((template) => template.id === s.templateId)?.exercises.find((entry) => entry.exerciseId === e.exercise.id);
+    if (config) Object.assign(config, {
+      customized: true, sets: settings.plannedSets, restSeconds: settings.restSeconds,
+      increment: settings.increment, measurementUnit: settings.measurementUnit,
+      customName: settings.customName || null, notes: settings.notes || null,
+    });
     state.exerciseSettings[e.exercise.id] = {
       ...state.exerciseSettings[e.exercise.id],
       plannedSets: settings.plannedSets,
@@ -439,15 +519,35 @@ export async function guestApi(path: string, init: RequestInit = {}) {
     save(state);
     return row;
   }
-  if (path === "/settings/program" && method === "GET")
-    return { preferredWeekdays: [...state.preferredWeekdays] };
+  const program = () => ({
+    preferredWeekdays: [...state.preferredWeekdays], assignments: copy(state.assignments),
+    templates: state.templates.map((template) => ({ ...copy(template), exercises: template.exercises.map((entry) => ({ ...entry, exercise: copy(exercises.find((item) => item.id === entry.exerciseId)) })) })),
+  });
+  if (path === "/settings/program" && method === "GET") return program();
   if (path === "/settings/program" && method === "PATCH") {
-    const days = body(init).preferredWeekdays;
-    if (!Array.isArray(days) || !days.length)
-      throw new Error("Select at least one training day");
-    state.preferredWeekdays = [...new Set(days)].sort((a, b) => a - b);
-    save(state);
-    return { preferredWeekdays: [...state.preferredWeekdays] };
+    const payload = body(init);
+    const assignments = payload.assignments || payload.preferredWeekdays?.map((weekday: number) => ({ weekday, templateId: state.assignments.find((day) => day.weekday === weekday)?.templateId || state.templates[0].id }));
+    if (!Array.isArray(assignments) || !assignments.length || assignments.length > 7 || new Set(assignments.map((a: any) => a.weekday)).size !== assignments.length || assignments.some((day: any) => !Number.isInteger(day.weekday) || day.weekday < 0 || day.weekday > 6 || !state.templates.some((template) => template.id === day.templateId)))
+      throw new Error("Select valid training days and workouts");
+    state.assignments = assignments;
+    state.preferredWeekdays = assignments.map((day: any) => day.weekday).sort((a: number, b: number) => a - b);
+    save(state); return program();
+  }
+  const planMatch = path.match(/^\/settings\/workouts(?:\/([^/]+))?$/);
+  if (planMatch && (method === "POST" || method === "PATCH")) {
+    const payload = body(init); const name = String(payload.name || "").trim();
+    const entries = payload.exercises;
+    if (!name || name.length > 80 || !Array.isArray(entries) || !entries.length || entries.length > 50 ||
+      new Set(entries.map((e: any) => e.exerciseId)).size !== entries.length || entries.some((e: any) => !exercises.some((item) => item.id === e.exerciseId) || !Number.isInteger(e.sets) || e.sets < 1 || e.sets > 20 || !Number.isInteger(e.minReps) || !Number.isInteger(e.maxReps) || e.minReps < 1 || e.maxReps > 100 || e.minReps > e.maxReps || !Number.isInteger(e.restSeconds) || e.restSeconds < 30 || e.restSeconds > 600 || !(e.increment > 0 && e.increment <= 100) || !["kg", "units"].includes(e.measurementUnit)))
+      throw new Error("Invalid workout settings");
+    const existing = method === "PATCH" ? state.templates.find((template) => template.id === planMatch[1]) : undefined;
+    if (method === "PATCH" && !existing) throw new Error("Workout not found");
+    if (state.templates.some((template) => template.id !== existing?.id && template.name.toLocaleLowerCase() === name.toLocaleLowerCase())) throw new Error("A workout with this name already exists");
+    const template = existing || { id: crypto.randomUUID(), name, exercises: [] };
+    template.name = name;
+    template.exercises = entries.map((entry: any) => ({ ...template.exercises.find((item) => item.exerciseId === entry.exerciseId), ...entry, customized: true }));
+    if (!existing) state.templates.push(template);
+    save(state); return program();
   }
   if (path.match(/^\/exercises\//) && method === "PATCH") return {};
   throw new Error(`Unsupported guest operation: ${method} ${path}`);

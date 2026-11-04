@@ -22,7 +22,7 @@ vi.mock("@prisma/client", async (importOriginal) => ({
 const tx = {
   workoutExercise: { findFirstOrThrow: db.exercise, update: db.updateExercise },
   workoutSet: { findUnique: db.findSet, create: db.createSet },
-  workoutTemplateExercise: { update: db.updateTemplate },
+  workoutTemplateExercise: { updateMany: db.updateTemplate },
 };
 const originalMutation = "00000000-0000-4000-8000-000000000001";
 const newMutation = "00000000-0000-4000-8000-000000000002";
@@ -206,7 +206,7 @@ describe("authenticated set reconciliation", () => {
       data: { lastWeight: new Prisma.Decimal(20), lastReps: 10, lastRir: null },
     });
     expect(db.updateTemplate).toHaveBeenCalledWith({
-      where: { templateId_exerciseId: { templateId: "template", exerciseId: "catalog-exercise" } },
+      where: { templateId: "template", exerciseId: "catalog-exercise" },
       data: { lastWeight: new Prisma.Decimal(20), lastReps: 10, lastRir: null },
     });
     expect((await post()).status).toBe(201);

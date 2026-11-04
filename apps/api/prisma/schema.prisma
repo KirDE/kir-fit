@@ -75,6 +75,7 @@ model WorkoutProgram {
   active            Boolean           @default(false)
   preferredWeekdays Int[]
   templates         WorkoutTemplate[]
+  dayAssignments    WorkoutDayAssignment[]
   createdAt         DateTime          @default(now())
 }
 
@@ -85,6 +86,17 @@ model WorkoutTemplate {
   name      String
   exercises WorkoutTemplateExercise[]
   sessions  WorkoutSession[]
+  dayAssignments WorkoutDayAssignment[]
+}
+
+model WorkoutDayAssignment {
+  programId String
+  program WorkoutProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+  weekday Int
+  templateId String
+  template WorkoutTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  @@id([programId, weekday])
 }
 
 model WorkoutTemplateExercise {

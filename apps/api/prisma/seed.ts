@@ -1,13 +1,14 @@
 import { PrismaClient, Prisma } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import catalog from "./exercise-catalog.json" with { type: "json" };
 
 const prisma = new PrismaClient();
 const exercises = [
   [
     "leg-press",
-    "Leg Press",
-    "Beinpresse",
-    "Жим ногами",
+    "Seated Leg Press",
+    "Beinpresse sitzend",
+    "Жим ногами сидя",
     "A seated machine with a weighted platform pushed away with both legs.",
     "Keep your back supported, knees tracking over toes, and do not lock the knees.",
     ["Quadriceps", "Glutes", "Hamstrings"],
@@ -69,9 +70,9 @@ const exercises = [
   ],
   [
     "leg-curl",
-    "Leg Curl",
-    "Beinbeuger",
-    "Сгибание ног",
+    "Seated Leg Curl",
+    "Beinbeuger sitzend",
+    "Сгибание ног сидя",
     "A seated or lying machine where the knees bend against a padded lever.",
     "Align knees with the pivot and control the return.",
     ["Hamstrings"],
@@ -101,13 +102,13 @@ const exercises = [
   ],
   [
     "triceps-pushdown",
-    "Triceps Pushdown",
-    "Trizeps am Kabel",
-    "Разгибание рук",
-    "A cable station where a bar or rope is pushed down by extending the elbows.",
-    "Pin elbows beside the torso and move only the forearms.",
+    "Triceps Press",
+    "Trizepsdrücken",
+    "Жим на трицепс",
+    "A seated machine with handles pressed down to extend the elbows.",
+    "Adjust the seat, keep shoulders stable and press the handles down without locking the elbows.",
     ["Triceps"],
-    "cable",
+    "machine",
     "isolation",
     2,
     10,
@@ -158,8 +159,8 @@ const germanCopy: Record<string, [string, string]> = {
     "Rippen unten halten und die Ellbogen nicht vollständig durchstrecken.",
   ],
   "triceps-pushdown": [
-    "Kabelstation, an der Stange oder Seil durch Strecken der Ellbogen nach unten gedrückt werden.",
-    "Ellbogen am Oberkörper fixieren und nur die Unterarme bewegen.",
+    "Sitzende Maschine, deren Griffe zum Strecken der Ellbogen nach unten gedrückt werden.",
+    "Sitz einstellen, Schultern stabil halten und Griffe ohne Durchdrücken der Ellbogen nach unten drücken.",
   ],
   "biceps-curl": [
     "Maschine oder Kabelstation, an der die Unterarme zu den Schultern gebeugt werden.",
@@ -192,8 +193,8 @@ const russianCopy: Record<string, [string, string]> = {
     "Не прогибайте поясницу и не блокируйте локти.",
   ],
   "triceps-pushdown": [
-    "Блочный тренажёр, где рукоять или канат опускаются вниз разгибанием локтей.",
-    "Зафиксируйте локти у корпуса и двигайте только предплечьями.",
+    "Сидячий тренажёр, где рукояти выжимаются вниз разгибанием локтей.",
+    "Настройте сиденье, держите плечи неподвижно и выжимайте рукояти вниз без блокировки локтей.",
   ],
   "biceps-curl": [
     "Тренажёр или блок, в котором предплечья сгибаются по направлению к плечам.",
@@ -280,6 +281,15 @@ async function main() {
         },
       });
   }
+  // Catalogue additions are opt-in only; never insert them into templates.
+  for (const entry of catalog.optionalExercises) {
+    const data = { ...entry, defaultIncrement: new Prisma.Decimal(entry.defaultIncrement) };
+    await prisma.exercise.upsert({ where: { id: entry.id }, update: data, create: data });
+    const image = await prisma.exerciseImage.findFirst({ where: { exerciseId: entry.id, isPrimary: true } });
+    const imageData = { path: `/exercise-images/${entry.id}.webp`, caption: `Life Fitness Insignia ${entry.nameEn}` };
+    if (image) await prisma.exerciseImage.update({ where: { id: image.id }, data: imageData });
+    else await prisma.exerciseImage.create({ data: { exerciseId: entry.id, ...imageData, sortOrder: 0, isPrimary: true } });
+  }
   let program = await prisma.workoutProgram.findFirst({
     where: { userId: user.id, name: "Full Body 3× weekly" },
   });
@@ -293,13 +303,15 @@ async function main() {
       },
     });
   let template = await prisma.workoutTemplate.findFirst({
-    where: { programId: program.id, name: "Full Body" },
+    where: { programId: program.id },
+    orderBy: { id: "asc" },
   });
+  const newTemplate = !template;
   if (!template)
     template = await prisma.workoutTemplate.create({
-      data: { programId: program.id, name: "Full Body" },
+      data: { programId: program.id, name: "Default" },
     });
-  for (let i = 0; i < exercises.length; i++) {
+  if (newTemplate) for (let i = 0; i < exercises.length; i++) {
     const [exerciseId, , , , , , , , , sets, minReps, maxReps, rest, inc] =
       exercises[i];
     await prisma.workoutTemplateExercise.upsert({
@@ -317,6 +329,10 @@ async function main() {
       },
     });
   }
+  if (newTemplate) await prisma.workoutDayAssignment.createMany({
+    data: program.preferredWeekdays.map((weekday) => ({ programId: program.id, weekday, templateId: template!.id })),
+    skipDuplicates: true,
+  });
   // Remove the former demo value. Real measurements must only be created by
   // the user; deployments and seeds must never invent health data.
   await prisma.bodyWeightEntry.deleteMany({

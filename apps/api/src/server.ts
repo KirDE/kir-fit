@@ -1,4 +1,6 @@
 import express from "express";
+import { starterExerciseIds } from "./catalog.js";
+import { registerWorkoutPlanRoutes, programInclude } from "./workout-plans.js";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
@@ -603,7 +605,7 @@ app.get(
     const uid = userId(req);
     const program = await prisma.workoutProgram.findFirst({
       where: { userId: uid, active: true },
-      include: { templates: true },
+      include: programInclude,
     });
     const last = await prisma.workoutSession.findFirst({
       where: { userId: uid, status: "completed" },
@@ -625,12 +627,15 @@ app.get(
             : [],
         )
         .slice(0, 3) || [];
+    const localDate = req.get("X-Kirfit-Local-Date");
+    const dayAnchor = localDate && /^\d{4}-\d{2}-\d{2}$/.test(localDate) && Number.isFinite(Date.parse(localDate)) ? new Date(`${localDate}T12:00:00`) : new Date();
+    const nextWorkout = program ? nextWorkoutDay(dayAnchor, program.preferredWeekdays) : null;
+    const assignment = program?.dayAssignments.find((day) => day.weekday === nextWorkout?.getDay());
+    const template = program?.templates.find((item) => item.id === assignment?.templateId) || program?.templates[0];
     res.json({
       displayName: u.displayName,
-      nextWorkout: program
-        ? nextWorkoutDay(new Date(), program.preferredWeekdays)
-        : null,
-      template: program?.templates[0] || null,
+      nextWorkout,
+      template: template ? { id: template.id, name: template.name, exerciseCount: template.exercises.length } : null,
       last: last ? sessionSummary(last) : null,
       currentWeight: weights.at(-1) ? num(weights.at(-1)!.weight) : null,
       weightChange:
@@ -642,40 +647,7 @@ app.get(
   }),
 );
 
-app.get(
-  "/api/settings/program",
-  auth,
-  asyncRoute(async (req, res) => {
-    const program = await prisma.workoutProgram.findFirstOrThrow({
-      where: { userId: userId(req), active: true },
-    });
-    res.json({ preferredWeekdays: program.preferredWeekdays });
-  }),
-);
-
-app.patch(
-  "/api/settings/program",
-  auth,
-  asyncRoute(async (req, res) => {
-    const body = z
-      .object({
-        preferredWeekdays: z
-          .array(z.number().int().min(0).max(6))
-          .min(1)
-          .max(7)
-          .refine((days) => new Set(days).size === days.length),
-      })
-      .parse(req.body);
-    const program = await prisma.workoutProgram.findFirstOrThrow({
-      where: { userId: userId(req), active: true },
-    });
-    const updated = await prisma.workoutProgram.update({
-      where: { id: program.id },
-      data: { preferredWeekdays: body.preferredWeekdays },
-    });
-    res.json({ preferredWeekdays: updated.preferredWeekdays });
-  }),
-);
+registerWorkoutPlanRoutes(app, prisma, auth, asyncRoute, userId);
 
 app.get(
   "/api/workouts/active",
@@ -797,6 +769,51 @@ app.post(
     res.status(201).json(serializeSession(session));
   }),
 );
+// Add catalogue equipment only to this active session, never to its template.
+app.post(
+  "/api/workouts/:sessionId/exercises",
+  auth,
+  asyncRoute(async (req, res) => {
+    const { exerciseId } = z.object({ exerciseId: z.string().min(1).max(120) }).parse(req.body);
+    const sessionId = String(req.params.sessionId);
+    const uid = userId(req);
+    const session = await prisma.$transaction(async (tx) => {
+      // Serialize additions per session: retries/concurrent clicks cannot duplicate a model.
+      const owned = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "WorkoutSession"
+        WHERE id = ${sessionId} AND "userId" = ${uid} AND status = 'active'
+        FOR UPDATE`;
+      if (!owned.length) throw Object.assign(new Error("Active workout not found"), { status: 404 });
+      const exercise = await tx.exercise.findFirstOrThrow({
+        where: { id: exerciseId, archived: false },
+        include: { machines: { where: { userId: uid, archived: false } } },
+      });
+      const existing = await tx.workoutExercise.findFirst({ where: { sessionId, exerciseId } });
+      if (!existing) {
+        const last = await tx.workoutExercise.aggregate({ where: { sessionId }, _max: { sortOrder: true } });
+        const previous = await tx.workoutExercise.findFirst({
+          where: { exerciseId, session: { userId: uid, status: "completed" }, sets: { some: {} } },
+          orderBy: { session: { finishedAt: "desc" } },
+          include: { sets: { orderBy: [{ completedAt: "desc" }, { setNumber: "desc" }], take: 1 } },
+        });
+        const previousSet = previous?.sets[0];
+        await tx.workoutExercise.create({ data: {
+          sessionId, exerciseId, sortOrder: (last._max.sortOrder ?? 0) + 1,
+          plannedSets: previous?.plannedSets ?? exercise.defaultSets,
+          minReps: exercise.minReps, maxReps: exercise.maxReps,
+          restSeconds: previous?.restSeconds ?? exercise.defaultRestSeconds,
+          increment: previous?.increment ?? exercise.defaultIncrement,
+          measurementUnit: previous?.measurementUnit ?? "kg",
+          customName: previous?.customName, notes: previous?.notes,
+          lastWeight: previousSet?.weight, lastReps: previousSet?.reps, lastRir: previousSet?.rir,
+          exerciseNameSnapshot: exercise.nameEn, machineId: exercise.machines[0]?.id,
+        } });
+      }
+      return tx.workoutSession.findUniqueOrThrow({ where: { id: sessionId }, include: sessionInclude });
+    });
+    res.json(serializeSession(session));
+  }),
+);
 app.post(
   "/api/workouts/:sessionId/sets",
   auth,
@@ -865,13 +882,8 @@ app.post(
           where: { id: ex.id },
           data: { lastWeight: weight, lastReps: body.reps, lastRir: rir },
         });
-        await tx.workoutTemplateExercise.update({
-          where: {
-            templateId_exerciseId: {
-              templateId: ex.session.templateId,
-              exerciseId: ex.exerciseId,
-            },
-          },
+        await tx.workoutTemplateExercise.updateMany({
+          where: { templateId: ex.session.templateId, exerciseId: ex.exerciseId },
           data: { lastWeight: weight, lastReps: body.reps, lastRir: rir },
         });
         return set;
@@ -927,13 +939,8 @@ app.patch(
         where: { id: exercise.id },
         data: body,
       }),
-      prisma.workoutTemplateExercise.update({
-        where: {
-          templateId_exerciseId: {
-            templateId: exercise.session.templateId,
-            exerciseId: exercise.exerciseId,
-          },
-        },
+      prisma.workoutTemplateExercise.updateMany({
+        where: { templateId: exercise.session.templateId, exerciseId: exercise.exerciseId },
         data: {
           sets: body.plannedSets,
           restSeconds: body.restSeconds,
@@ -1103,6 +1110,18 @@ app.get(
   }),
 );
 app.get(
+  "/api/exercises/history",
+  auth,
+  asyncRoute(async (req, res) => {
+    const rows = await prisma.exercise.findMany({
+      where: { workoutExercises: { some: { session: { userId: userId(req), status: "completed" }, sets: { some: {} } } } },
+      include: { images: { orderBy: { sortOrder: "asc" } } },
+      orderBy: { nameEn: "asc" },
+    });
+    res.json(rows.map(serializeExercise));
+  }),
+);
+app.get(
   "/api/exercises/:id/progress",
   auth,
   asyncRoute(async (req, res) => {
@@ -1110,6 +1129,7 @@ app.get(
       where: {
         exerciseId: req.params.id,
         session: { userId: userId(req), status: "completed" },
+        sets: { some: {} },
       },
       orderBy: { session: { finishedAt: "asc" } },
       include: { sets: true, session: true, exercise: true },
@@ -1815,7 +1835,7 @@ async function consumePasskeyChallenge(id: string, purpose: string) {
 }
 async function provisionStarterProgram(uid: string) {
   const exercises = await prisma.exercise.findMany({
-    where: { archived: false },
+    where: { archived: false, id: { in: starterExerciseIds } },
     orderBy: { createdAt: "asc" },
   });
   const program = await prisma.workoutProgram.create({
@@ -1826,10 +1846,10 @@ async function provisionStarterProgram(uid: string) {
       preferredWeekdays: [3, 5, 0],
     },
   });
-  await prisma.workoutTemplate.create({
+  const template = await prisma.workoutTemplate.create({
     data: {
       programId: program.id,
-      name: "Full Body",
+      name: "Default",
       exercises: {
         create: exercises.map((e, i) => ({
           exerciseId: e.id,
@@ -1843,4 +1863,5 @@ async function provisionStarterProgram(uid: string) {
       },
     },
   });
+  await prisma.workoutDayAssignment.createMany({ data: [3, 5, 0].map((weekday) => ({ programId: program.id, weekday, templateId: template.id })) });
 }

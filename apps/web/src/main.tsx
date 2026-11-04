@@ -43,10 +43,15 @@ import {
   remainingRestSeconds,
   type RestTimerState,
 } from "./offline";
-import { getLanguage, setLanguage, tr } from "./i18n";
+import {
+  getLanguage, setLanguage, tr,
+  exerciseName as localizedName, getExerciseNameLanguagePreference,
+  setExerciseNameLanguage, type ExerciseNameLanguage,
+} from "./i18n";
 import { paddedDomain } from "./chart";
 import type { Exercise, Session, WorkoutExercise } from "./types";
 import { Nutrition, NutritionDashboardCard } from "./Nutrition";
+import { WorkoutPlans } from "./WorkoutPlans";
 import "./styles.css";
 import { registerSW } from "virtual:pwa-register";
 import "./enhancements.css";
@@ -115,12 +120,6 @@ const localizedWeekdays = () => {
     abbreviation: abbreviations[value],
   }));
 };
-const localizedName = (e: Exercise) =>
-  getLanguage() === "ru"
-    ? e.nameRu || e.nameEn
-    : getLanguage() === "de"
-      ? e.nameDe
-      : e.nameEn;
 const localizedDescription = (e: Exercise) =>
   getLanguage() === "ru"
     ? e.descriptionRu || e.description
@@ -530,7 +529,7 @@ function Dashboard({
     );
   }, []);
   if (!d) return <Loading />;
-  const next = new Date(d.nextWorkout),
+  const next = new Date(`${String(d.nextWorkout).slice(0, 10)}T12:00:00`),
     lang = getLanguage(),
     nextDay = localizedWeekdays().find(
       (day) => day.value === next.getDay(),
@@ -542,7 +541,7 @@ function Dashboard({
         <p className="eyebrow">{tr("nextWorkout")}</p>
         <h1>{nextDay}</h1>
         <p>
-          {d.template?.name || "Full Body"} · 8{" "}
+          {d.template?.name || "Default"} · {d.template?.exerciseCount ?? 8}{" "}
           {lang === "ru" ? "упражнений" : tr("exercises").toLowerCase()}
         </p>
         <button className="primary big" onClick={start}>
@@ -758,7 +757,7 @@ export function Workout({ done }: { done: () => void }) {
       const restarted = await api("/workouts/start", {
         method: "POST",
         body: JSON.stringify({
-          templateId: dashboard.template.id,
+          templateId: s.templateId || dashboard.template.id,
           clientMutationId: uuid(),
         }),
       });
@@ -855,7 +854,7 @@ export function Workout({ done }: { done: () => void }) {
           <b>
             {completedCount} / {s.exercises.length} {tr("completed")}
           </b>
-          <small>Full Body</small>
+          <small>{s.template?.name || "Default"}</small>
         </div>
         <span className="workout-time">
           {Math.max(
@@ -901,12 +900,26 @@ export function Workout({ done }: { done: () => void }) {
         />
       </div>
       {finishError && <p className="error workout-error">{finishError}</p>}
-      {rest !== null && (
-        <RestTimer
-          seconds={rest}
-          change={(change) => setRestSeconds(Math.max(0, rest + change))}
-          skip={clearRest}
-        />
+      {((exerciseOpen && ex) || (rest !== null && rest > 0)) && (
+        <div className="workout-detail-toolbar">
+          {exerciseOpen && ex && (
+            <button
+              type="button"
+              className="workout-grid-back"
+              aria-label={tr("exercises")}
+              onClick={() => setExerciseOpen(false)}
+            >
+              <ArrowLeft size={18} />
+            </button>
+          )}
+          {rest !== null && rest > 0 && (
+            <RestTimer
+              seconds={rest}
+              change={(change) => setRestSeconds(Math.max(0, rest + change))}
+              skip={clearRest}
+            />
+          )}
+        </div>
       )}
       {ex && !exerciseOpen ? (
         <div className="workout-machine-grid" aria-label={tr("exercises")}>
@@ -940,13 +953,6 @@ export function Workout({ done }: { done: () => void }) {
         </div>
       ) : ex ? (
         <>
-          <button
-            type="button"
-            className="workout-grid-back"
-            onClick={() => setExerciseOpen(false)}
-          >
-            <ArrowLeft size={18} /> {tr("exercises")}
-          </button>
           <ExerciseCard
             ex={ex}
             save={save}
@@ -1219,13 +1225,7 @@ function ExerciseCard({
             / {ex.plannedSets} {tr("sets")}
           </p>
           <h1>{ex.customName || localizedName(ex.exercise)}</h1>
-          <h2>
-            {ex.customName
-              ? localizedName(ex.exercise)
-              : getLanguage() === "en"
-                ? ex.exercise.nameDe
-                : ex.exercise.nameEn}
-          </h2>
+          {ex.customName && <h2>{localizedName(ex.exercise)}</h2>}
         </div>
         <button
           type="button"
@@ -1479,17 +1479,27 @@ function RestTimer({
   change: (n: number) => void;
   skip: () => void;
 }) {
+  const menuRef = useRef<HTMLDetailsElement>(null);
+  const adjust = (seconds: number) => {
+    menuRef.current?.removeAttribute("open");
+    change(seconds);
+  };
   return (
     <div className="rest">
-      <div>
+      <div className="rest-countdown">
         <span>{tr("rest")}</span>
         <strong>
           {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}
         </strong>
       </div>
-      <button onClick={() => change(-30)}>−30s</button>
-      <button onClick={() => change(30)}>+30s</button>
-      <button onClick={skip}>{tr("skip")}</button>
+      <details ref={menuRef} className="rest-menu">
+        <summary aria-label={tr("restMenu")}><Ellipsis /></summary>
+        <div>
+          <button type="button" onClick={() => adjust(-30)}>−30s</button>
+          <button type="button" onClick={() => adjust(30)}>+30s</button>
+          <button type="button" onClick={skip}>{tr("skip")}</button>
+        </div>
+      </details>
     </div>
   );
 }
@@ -1630,29 +1640,47 @@ function History({ resume }: { resume: () => void }) {
     </section>
   );
 }
-function Progress() {
+export function Progress() {
   const [items, setItems] = useState<Exercise[]>(),
     [selected, setSelected] = useState<string>(),
-    [data, setData] = useState<any>();
+    [data, setData] = useState<any>(),
+    [progressError, setProgressError] = useState("");
   useEffect(() => {
-    api("/exercises").then((x: Exercise[]) => {
+    let active = true;
+    api("/exercises/history").then((x: Exercise[]) => {
+      if (!active) return;
       setItems(x);
       setSelected(x[0]?.id);
-    });
+    }).catch(() => { if (active) setProgressError(tr("progressLoadError")); });
+    return () => { active = false; };
   }, []);
   useEffect(() => {
-    if (selected) api("/exercises/" + selected + "/progress").then(setData);
+    let active = true;
+    setData(undefined);
+    if (!selected) return;
+    setProgressError("");
+    api("/exercises/" + selected + "/progress").then((result) => {
+      if (active) setData(result);
+    }).catch(() => { if (active) setProgressError(tr("progressLoadError")); });
+    return () => { active = false; };
   }, [selected]);
   return (
-    <section>
+    <section className="progress-page">
       <Header title={tr("progress")} />
-      <select value={selected} onChange={(e) => setSelected(e.target.value)}>
+      <BodyWeight embedded />
+      <section className="machine-progress">
+      <h2>{tr("machineProgress")}</h2>
+      {progressError && <p className="error" role="alert">{progressError}</p>}
+      {!items && !progressError && <Loading />}
+      {items?.length === 0 && <p className="empty-machine-history">{tr("noMachineHistory")}</p>}
+      {!!items?.length && <select className="machine-progress-select" aria-label={tr("exercises")} value={selected} onChange={(e) => setSelected(e.target.value)}>
         {items?.map((e) => (
           <option value={e.id} key={e.id}>
-            {localizedName(e)} / {e.nameEn}
+            {localizedName(e)}
           </option>
         ))}
-      </select>
+      </select>}
+      {selected && !data && !progressError && <Loading />}
       {data && (
         <>
           <div className="grid">
@@ -1685,7 +1713,7 @@ function Progress() {
           </Card>
         </>
       )}
-      <BodyWeight embedded />
+      </section>
     </section>
   );
 }
@@ -1823,8 +1851,14 @@ function BodyWeight({ embedded = false }: { embedded?: boolean }) {
 }
 function Admin({ logout }: { logout: () => void }) {
   const [items, setItems] = useState<Exercise[]>();
-  const [weekdays, setWeekdays] = useState<number[]>();
-  const [daysSaved, setDaysSaved] = useState(false);
+  const [exerciseNameLanguage, setNameLanguage] = useState(getExerciseNameLanguagePreference);
+  const [activeWorkout, setActiveWorkout] = useState<Session | null>();
+  const [addingExercise, setAddingExercise] = useState<string | null>(null);
+  const [catalogActionError, setCatalogActionError] = useState("");
+  const loadActiveWorkout = () => {
+    setCatalogActionError("");
+    api("/workouts/active").then(setActiveWorkout).catch(() => setCatalogActionError(tr("workoutLoadError")));
+  };
   const [displayName, setDisplayName] = useState("");
   const [accountSecurity, setAccountSecurity] = useState<{
     googleLinked: boolean;
@@ -1842,7 +1876,7 @@ function Admin({ logout }: { logout: () => void }) {
   const load = () => api("/exercises").then(setItems);
   useEffect(() => {
     load();
-    api("/settings/program").then((x) => setWeekdays(x.preferredWeekdays));
+    loadActiveWorkout();
     api("/settings/nutrition")
       .then(setNutritionProfile)
       .catch((error) =>
@@ -2125,48 +2159,24 @@ function Admin({ logout }: { logout: () => void }) {
 
       <Card title={tr("language")}>
         <LanguageSwitcher />
+        <label className="exercise-name-language">
+          {tr("exerciseNameLanguage")}
+          <select
+            value={exerciseNameLanguage}
+            onChange={(event) => {
+              const value = event.target.value as ExerciseNameLanguage;
+              setExerciseNameLanguage(value);
+              setNameLanguage(value);
+            }}
+          >
+            <option value="app">{tr("sameAsApp")}</option>
+            <option value="en">English</option>
+            <option value="de">Deutsch</option>
+            <option value="ru">Русский</option>
+          </select>
+        </label>
       </Card>
-      <Card title={tr("trainingDays")}>
-        {weekdays && (
-          <>
-            <div className="weekday-picker">
-              {localizedWeekdays().map((day) => (
-                <button
-                  type="button"
-                  key={day.value}
-                  className={weekdays.includes(day.value) ? "selected" : ""}
-                  aria-label={day.name}
-                  onClick={() => {
-                    setDaysSaved(false);
-                    setWeekdays((current) =>
-                      current!.includes(day.value)
-                        ? current!.length === 1
-                          ? current
-                          : current!.filter((x) => x !== day.value)
-                        : [...current!, day.value],
-                    );
-                  }}
-                >
-                  {day.abbreviation}
-                </button>
-              ))}
-            </div>
-            <button
-              className="primary"
-              onClick={async () => {
-                const result = await api("/settings/program", {
-                  method: "PATCH",
-                  body: JSON.stringify({ preferredWeekdays: weekdays }),
-                });
-                setWeekdays(result.preferredWeekdays);
-                setDaysSaved(true);
-              }}
-            >
-              {daysSaved ? tr("saved") : tr("saveTrainingDays")}
-            </button>
-          </>
-        )}
-      </Card>
+      <WorkoutPlans exercises={items} weekdays={localizedWeekdays()} />
       <Card title={tr("account")}>
         <strong>{isGuest() ? tr("guest") : "Google / Kir Fit"}</strong>
         {isGuest() && <span>{tr("dataLocal")}</span>}
@@ -2175,6 +2185,9 @@ function Admin({ logout }: { logout: () => void }) {
         </button>
       </Card>
       <Header title={tr("exercises")} />
+      <p className="catalog-scope">{activeWorkout === null ? tr("startWorkoutToAdd") : tr("onlyThisWorkout")}</p>
+      {catalogActionError && <p className="error" role="alert">{catalogActionError}</p>}
+      {activeWorkout === undefined && catalogActionError && <button type="button" onClick={loadActiveWorkout}>{tr("retry")}</button>}
       {items.map((e) => (
         <details className="admin" key={e.id}>
           <summary>
@@ -2185,9 +2198,6 @@ function Admin({ logout }: { logout: () => void }) {
             />
             <div>
               <b>{localizedName(e)}</b>
-              <span>
-                {e.nameEn} / {e.nameDe}
-              </span>
             </div>
           </summary>
           <p>{localizedDescription(e)}</p>
@@ -2195,6 +2205,22 @@ function Admin({ logout }: { logout: () => void }) {
             <b>{tr("targets")}:</b>{" "}
             {localizedTargets(e.targetMuscles).join(", ")}
           </p>
+          <button
+            type="button"
+            className="primary catalog-add-button"
+            disabled={!activeWorkout || !!addingExercise || activeWorkout.exercises.some((item) => item.exercise.id === e.id)}
+            aria-label={`${activeWorkout?.exercises.some((item) => item.exercise.id === e.id) ? tr("exerciseIncluded") : tr("addExercise")}: ${localizedName(e)}`}
+            onClick={async () => {
+              if (!activeWorkout || addingExercise) return;
+              setAddingExercise(e.id); setCatalogActionError("");
+              try {
+                setActiveWorkout(await api(`/workouts/${activeWorkout.id}/exercises`, { method: "POST", body: JSON.stringify({ exerciseId: e.id }) }));
+              } catch { setCatalogActionError(tr("addExerciseError")); }
+              finally { setAddingExercise(null); }
+            }}
+          >
+            {activeWorkout?.exercises.some((item) => item.exercise.id === e.id) ? <><Check size={18} /> {tr("exerciseIncluded")}</> : <><Plus size={18} /> {tr("addToWorkout")}</>}
+          </button>
           <label>
             {tr("note")}
             <textarea

@@ -61,6 +61,13 @@ describe("active workout menu", () => {
     expect(within(screen.getByLabelText("Exercises")).getAllByRole("button")).toHaveLength(tiles.length);
   });
 
+  it("keeps catalogue controls out of the workout screen", async () => {
+    render(<Workout done={vi.fn()} />);
+    const grid = await screen.findByLabelText("Exercises");
+    expect(within(grid).getAllByRole("button")).toHaveLength(8);
+    expect(screen.queryByRole("button", { name: /Add exercise/ })).toBeNull();
+  });
+
   it("persists machine notes when settings are reopened and in the next workout", async () => {
     render(<Workout done={vi.fn()} />);
 

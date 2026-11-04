@@ -1027,3 +1027,92 @@
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
+
+.workout-detail-toolbar {
+  position: sticky;
+  top: 8px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.workout-detail-toolbar .workout-grid-back {
+  flex: 0 0 44px;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+}
+.workout-detail-toolbar .rest {
+  position: static;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 13px;
+}
+.rest .rest-countdown {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.rest-menu { position: relative; }
+.rest-menu summary {
+  color: #eaf5e4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  cursor: pointer;
+  list-style: none;
+}
+.rest-menu summary::-webkit-details-marker { display: none; }
+.rest .rest-menu > div {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  gap: 4px;
+  min-width: 150px;
+  padding: 6px;
+  margin: 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  box-shadow: 0 8px 24px #0005;
+}
+.rest .rest-menu button {
+  min-height: 44px;
+  text-align: left;
+  padding: 10px 12px;
+  background: var(--panel2);
+  color: var(--text);
+}
+
+.exercise-name-language { margin-top: 16px; }
+
+/* Manufacturer equipment images are letterboxed rather than cropped. */
+.workout-machine-tile > img,
+.zoomable-image > img { object-fit: contain; background: #fff; }
+.catalog-add-button { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin: 14px 0; }
+.catalog-scope { color: var(--muted); font-size: .85rem; }
+
+.workout-plans > p:not(.eyebrow) { color: var(--muted); font-size: .85rem; }
+.workout-plan-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 0; }
+.workout-plan-summary > div { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.workout-plan-summary small { color: var(--muted); }
+.workout-plan-summary button, .plan-exercise-actions button { min-height: 44px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--panel2); padding: 8px 12px; }
+.workout-plan-editor { display: grid; gap: 14px; margin-top: 14px; }
+.plan-exercise { min-width: 0; margin: 0; border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+.plan-exercise legend { overflow-wrap: anywhere; max-width: 100%; }
+.plan-exercise-actions { display: flex; gap: 8px; margin-bottom: 10px; }
+.plan-exercise-inputs { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.plan-exercise-inputs input, .plan-exercise-inputs select { min-width: 0; }
+.workout-schedule .workout-day-row { display: grid; grid-template-columns: minmax(80px,1fr) minmax(0,2fr); align-items: center; gap: 10px; margin-bottom: 10px; }
+.workout-day-row select { min-width: 0; }
+
+.progress-page > .weight-in-progress { margin-top: 0; }
+.machine-progress { margin-top: 28px; }
+.machine-progress-select { display: block; margin-bottom: 20px; }
+.empty-machine-history { color: var(--muted); }
