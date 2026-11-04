@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  ArrowLeft,
   Check,
   Dumbbell,
   Eye,
@@ -594,6 +595,7 @@ export function Workout({ done }: { done: () => void }) {
   const workoutMenuRef = useRef<HTMLDetailsElement>(null);
   const [s, setS] = useState<Session | null | undefined>(),
     [index, setIndex] = useState(0),
+    [exerciseOpen, setExerciseOpen] = useState(false),
     [restTimer, setRestTimer] = useState<RestTimerState | null>(null),
     [clockNow, setClockNow] = useState(() => Date.now()),
     [showCompleted, setShowCompleted] = useState(false),
@@ -761,6 +763,7 @@ export function Workout({ done }: { done: () => void }) {
         }),
       });
       setIndex(0);
+      setExerciseOpen(false);
       setShowCompleted(false);
       setS(restarted);
       setWorkoutAction(null);
@@ -905,8 +908,45 @@ export function Workout({ done }: { done: () => void }) {
           skip={clearRest}
         />
       )}
-      {ex ? (
+      {ex && !exerciseOpen ? (
+        <div className="workout-machine-grid" aria-label={tr("exercises")}>
+          {visibleExercises.map((exercise, exerciseIndex) => {
+            const name = exercise.customName || localizedName(exercise.exercise);
+            const completed = exercise.sets.length >= exercise.plannedSets;
+            return (
+              <button
+                type="button"
+                className="workout-machine-tile"
+                key={exercise.id}
+                aria-label={name}
+                onClick={() => {
+                  setIndex(exerciseIndex);
+                  setExerciseOpen(true);
+                }}
+              >
+                <img
+                  src={exercise.exercise.images[0]?.path || "/icon.svg"}
+                  alt=""
+                  loading="lazy"
+                />
+                <span className="workout-machine-name">{name}</span>
+                <small>
+                  {completed && <Check size={14} aria-hidden="true" />}
+                  {exercise.sets.length} / {exercise.plannedSets} {tr("sets")}
+                </small>
+              </button>
+            );
+          })}
+        </div>
+      ) : ex ? (
         <>
+          <button
+            type="button"
+            className="workout-grid-back"
+            onClick={() => setExerciseOpen(false)}
+          >
+            <ArrowLeft size={18} /> {tr("exercises")}
+          </button>
           <ExerciseCard
             ex={ex}
             save={save}

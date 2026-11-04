@@ -44,10 +44,29 @@ describe("active workout menu", () => {
       summary: { setCount: 0 },
     });
   });
+  it("opens the selected machine, keeps carousel navigation and returns to the grid", async () => {
+    render(<Workout done={vi.fn()} />);
+    const grid = await screen.findByLabelText("Exercises");
+    const tiles = within(grid).getAllByRole("button");
+    const names = tiles.map((tile) => tile.getAttribute("aria-label")!);
+    expect(tiles.length).toBeGreaterThan(2);
+    expect(screen.queryByRole("button", { name: "Exercise settings" })).toBeNull();
+    fireEvent.click(tiles[1]);
+    expect(screen.getByRole("heading", { name: names[1], level: 1 })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Next exercise" }));
+    expect(screen.getByRole("heading", { name: names[2], level: 1 })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+    expect(screen.getByRole("heading", { name: names[1], level: 1 })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Exercises" }));
+    expect(within(screen.getByLabelText("Exercises")).getAllByRole("button")).toHaveLength(tiles.length);
+  });
+
   it("persists machine notes when settings are reopened and in the next workout", async () => {
     render(<Workout done={vi.fn()} />);
 
     await screen.findByText(/0 \/ \d+ completed/);
+    const grid = screen.getByLabelText("Exercises");
+    fireEvent.click(within(grid).getAllByRole("button")[0]);
     fireEvent.click(screen.getByRole("button", { name: "Exercise settings" }));
     const notes = screen.getByLabelText("Machine notes");
     fireEvent.change(notes, { target: { value: "Seat 4, neutral grip" } });

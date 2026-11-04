@@ -968,3 +968,62 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Compact workout overview; retain two columns even on narrow phones. */
+.workout-machine-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.workout-machine-tile {
+  min-width: 0;
+  padding: 0 0 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.workout-machine-tile > img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: var(--panel2);
+}
+.workout-machine-name {
+  display: block;
+  margin: 10px 12px 6px;
+  font-size: .85rem;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.workout-machine-tile > small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 12px;
+  color: var(--muted);
+  font-size: .75rem;
+}
+.workout-grid-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  margin-bottom: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 12px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+.workout-machine-tile:focus-visible,
+.workout-grid-back:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
