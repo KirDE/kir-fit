@@ -1116,3 +1116,13 @@
 .machine-progress { margin-top: 28px; }
 .machine-progress-select { display: block; margin-bottom: 20px; }
 .empty-machine-history { color: var(--muted); }
+
+/* Recharts' focusable SVG keeps keyboard navigation without a native white halo. */
+.chart .recharts-surface:focus {
+  outline: none;
+}
+.chart .recharts-surface:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}

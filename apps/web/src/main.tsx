@@ -1740,9 +1740,18 @@ function Chart({
             }),
           }))}
         >
-          <XAxis dataKey="date" />
-          <YAxis width={45} domain={yDomain} />
+          <XAxis dataKey="date" stroke="var(--muted)" />
+          <YAxis width={45} domain={yDomain} stroke="var(--muted)" />
           <Tooltip
+            contentStyle={{
+              background: "var(--panel2)",
+              border: "1px solid var(--line)",
+              borderRadius: 12,
+              color: "var(--text)",
+            }}
+            labelStyle={{ color: "var(--text)" }}
+            itemStyle={{ color: "var(--text)" }}
+            cursor={{ stroke: "var(--muted)" }}
             formatter={(v: any) => [
               `${Number(v).toLocaleString()}${suffix}`,
               dataKey,
@@ -1751,9 +1760,10 @@ function Chart({
           <Line
             type="monotone"
             dataKey={dataKey}
-            stroke="#caff4a"
+            stroke="var(--accent)"
             strokeWidth={3}
-            dot={{ r: 4 }}
+            dot={{ r: 4, fill: "var(--panel)", stroke: "var(--accent)" }}
+            activeDot={{ r: 5, fill: "var(--accent)", stroke: "var(--panel)" }}
           />
         </LineChart>
       </ResponsiveContainer>
