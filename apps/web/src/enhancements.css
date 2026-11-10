@@ -1118,7 +1118,8 @@
 .empty-machine-history { color: var(--muted); }
 
 /* Recharts' focusable SVG keeps keyboard navigation without a native white halo. */
-.chart .recharts-surface:focus {
+.chart .recharts-surface:focus,
+.chart .recharts-surface [tabindex="-1"]:focus {
   outline: none;
 }
 .chart .recharts-surface:focus-visible {
