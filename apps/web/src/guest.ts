@@ -356,6 +356,15 @@ export async function guestApi(path: string, init: RequestInit = {}) {
     }
     return session(active);
   }
+  const removeMatch = path.match(/^\/workouts\/([^/]+)\/exercises\/([^/]+)$/);
+  if (removeMatch && method === "DELETE") {
+    const active = state.sessions.find((item) => item.id === removeMatch[1] && item.status === "active");
+    if (!active) throw new Error("Active workout not found");
+    if (!active.exercises.some((item: any) => item.id === removeMatch[2])) throw new Error("Workout exercise not found");
+    active.exercises = active.exercises.filter((item: any) => item.id !== removeMatch[2]);
+    save(state);
+    return session(active);
+  }
   let m = path.match(/^\/workouts\/([^/]+)\/sets$/);
   if (m && method === "POST") {
     const sessionId = m[1];

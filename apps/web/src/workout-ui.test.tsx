@@ -44,6 +44,70 @@ describe("active workout menu", () => {
       summary: { setCount: 0 },
     });
   });
+  it("removes a logged machine only after confirmation and preserves future workouts", async () => {
+    render(<Workout done={vi.fn()} />);
+    const grid = await screen.findByLabelText("Exercises");
+    const first = within(grid).getAllByRole("button")[0];
+    const name = first.getAttribute("aria-label")!;
+    fireEvent.click(first);
+    const active: any = await guestApi("/workouts/active");
+    await guestApi(`/workouts/${active.id}/sets`, { method: "POST", body: JSON.stringify({ workoutExerciseId: active.exercises[0].id, setNumber: 1, weight: 20, reps: 8 }) });
+    fireEvent.click(screen.getByLabelText("Machine menu"));
+    fireEvent.click(screen.getByRole("button", { name: "Remove machine" }));
+    let dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByText(/recorded sets/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect((await guestApi("/workouts/active") as any).exercises).toHaveLength(8);
+    fireEvent.click(screen.getByLabelText("Machine menu"));
+    fireEvent.click(screen.getByRole("button", { name: "Remove machine" }));
+    dialog = screen.getByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove machine" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(within(screen.getByLabelText("Exercises")).queryByRole("button", { name })).toBeNull();
+    expect((await guestApi("/workouts/active") as any).exercises).toHaveLength(7);
+    await guestApi(`/workouts/${active.id}/finish`, { method: "POST", body: "{}" });
+    const next: any = await guestApi("/workouts/start", { method: "POST", body: JSON.stringify({ clientMutationId: crypto.randomUUID() }) });
+    expect(next.exercises).toHaveLength(8);
+  });
+
+  it("dismisses overflow menus outside and on Escape but keeps inside interactions working", async () => {
+    render(<Workout done={vi.fn()} />);
+    const grid = await screen.findByLabelText("Exercises");
+    fireEvent.click(within(grid).getAllByRole("button")[0]);
+    for (const label of ["Workout menu", "Machine menu", "RIR"]) {
+      const summary = screen.getByLabelText(label);
+      const details = summary.closest("details")!;
+      details.open = true;
+      fireEvent.pointerDown(summary);
+      expect(details.open).toBe(true);
+      fireEvent.pointerDown(document.body);
+      expect(details.open).toBe(false);
+      details.open = true;
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(details.open).toBe(false);
+      expect(document.activeElement).toBe(summary);
+    }
+    const rir = screen.getByLabelText("RIR").closest("details")!;
+    rir.open = true;
+    fireEvent.click(within(rir).getByRole("button", { name: "2" }));
+    expect(rir.open).toBe(false);
+    expect(screen.getByText("RIR 2")).toBeTruthy();
+  });
+
+  it("handles removing the final machine and still allows finishing", async () => {
+    const active: any = await guestApi("/workouts/start", { method: "POST", body: JSON.stringify({ clientMutationId: crypto.randomUUID() }) });
+    for (const exercise of active.exercises.slice(1)) await guestApi(`/workouts/${active.id}/exercises/${exercise.id}`, { method: "DELETE" });
+    render(<Workout done={vi.fn()} />);
+    const grid = await screen.findByLabelText("Exercises");
+    fireEvent.click(within(grid).getAllByRole("button")[0]);
+    fireEvent.click(screen.getByLabelText("Machine menu"));
+    fireEvent.click(screen.getByRole("button", { name: "Remove machine" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove machine" }));
+    await screen.findByText("0 / 0 completed");
+    expect((await guestApi("/workouts/active") as any).exercises).toHaveLength(0);
+    expect(screen.getAllByRole("button", { name: "Finish workout" })).toHaveLength(2);
+  });
+
   it("opens the selected machine, keeps carousel navigation and returns to the grid", async () => {
     render(<Workout done={vi.fn()} />);
     const grid = await screen.findByLabelText("Exercises");

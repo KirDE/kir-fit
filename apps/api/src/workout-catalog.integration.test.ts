@@ -65,6 +65,26 @@ describe.skipIf(!process.env.DATABASE_URL)("opt-in workout catalogue", () => {
     expect(next.status).toBe(201); expect(next.body.exercises.map((e: any) => e.exercise.id)).toEqual([baseId]);
     expect((await call(`/api/workouts/${sessionId}/exercises`).send({ exerciseId: extraId })).status).toBe(404);
   });
+  it("removes only owned active-session snapshots and their sets, leaving templates intact", async () => {
+    const active = await api.prisma.workoutSession.findFirstOrThrow({ where: { userId: uid, status: "active" }, include: { exercises: true } });
+    const target = active.exercises[0];
+    const remove = (sid: string, eid: string, auth = token) => request(api.app).delete(`/api/workouts/${sid}/exercises/${eid}`).set("Authorization", `Bearer ${auth}`);
+    expect((await remove(active.id, target.id, otherToken)).status).toBe(404);
+    expect((await remove(sessionId, target.id)).status).toBe(404);
+    expect((await remove(active.id, "missing")).status).toBe(404);
+    await call(`/api/workouts/${active.id}/sets`).send({ workoutExerciseId: target.id, setNumber: 1, weight: 30, reps: 8, clientMutationId: crypto.randomUUID() });
+    const removed = await remove(active.id, target.id);
+    expect(removed.status).toBe(200);
+    expect(removed.body.exercises).toEqual([]);
+    expect(await api.prisma.workoutSet.count({ where: { workoutExerciseId: target.id } })).toBe(0);
+    expect(await api.prisma.workoutTemplateExercise.count({ where: { templateId } })).toBe(1);
+    expect((await remove(active.id, target.id)).status).toBe(404);
+    expect((await call(`/api/workouts/${active.id}/finish`).send({})).status).toBe(200);
+    const next = await call("/api/workouts/start").send({ templateId, clientMutationId: crypto.randomUUID() });
+    expect(next.body.exercises.map((e: any) => e.exercise.id)).toEqual([baseId]);
+    // The earlier completed ad-hoc machine and its recorded set remain intact.
+    expect(await api.prisma.workoutExercise.count({ where: { sessionId, exerciseId: extraId } })).toBe(1);
+  });
   it("lists only personally logged completed-session machines, retaining archived history", async () => {
     await api.prisma.exercise.update({ where: { id: extraId }, data: { archived: true } });
     const result = await request(api.app).get("/api/exercises/history").set("Authorization", `Bearer ${token}`);
