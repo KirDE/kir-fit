@@ -622,6 +622,8 @@ function DismissibleMenu({ children, className, menuRef }: {
 }
 export function Workout({ done }: { done: () => void }) {
   const workoutMenuRef = useRef<HTMLDetailsElement>(null);
+  const pendingSetSaves = useRef(new Set<Promise<void>>());
+  const removalInFlight = useRef(false);
   const [s, setS] = useState<Session | null | undefined>(),
     [index, setIndex] = useState(0),
     [exerciseOpen, setExerciseOpen] = useState(false),
@@ -805,29 +807,37 @@ export function Workout({ done }: { done: () => void }) {
     }
   };
   const save = async (data: any) => {
-    if (!ex) return;
-    const mutation = uuid();
-    const payload = {
-      ...data,
-      workoutExerciseId: ex.id,
-      setNumber: ex.sets.length + 1,
-      clientMutationId: mutation,
-    };
+    if (!ex || removalInFlight.current) return;
+    const saving = (async () => {
+      const mutation = uuid();
+      const payload = {
+        ...data,
+        workoutExerciseId: ex.id,
+        setNumber: ex.sets.length + 1,
+        clientMutationId: mutation,
+      };
+      try {
+        await api(`/workouts/${s.id}/sets`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        await reload();
+      } catch {
+        queue({
+          id: mutation,
+          path: `/workouts/${s.id}/sets`,
+          init: { method: "POST", body: JSON.stringify(payload) },
+        });
+        await reload().catch(() => {});
+      }
+      setRestSeconds(ex.restSeconds);
+    })();
+    pendingSetSaves.current.add(saving);
     try {
-      await api(`/workouts/${s.id}/sets`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      await reload();
-    } catch {
-      queue({
-        id: mutation,
-        path: `/workouts/${s.id}/sets`,
-        init: { method: "POST", body: JSON.stringify(payload) },
-      });
-      await reload().catch(() => {});
+      await saving;
+    } finally {
+      pendingSetSaves.current.delete(saving);
     }
-    setRestSeconds(ex.restSeconds);
   };
   const updateSettings = async (settings: {
     plannedSets: number;
@@ -845,10 +855,14 @@ export function Workout({ done }: { done: () => void }) {
     setS(updated);
   };
   const removeExercise = async () => {
-    if (!removeTarget || removing) return;
+    if (!removeTarget || removalInFlight.current) return;
+    removalInFlight.current = true;
     setRemoving(true);
     setFinishError("");
     try {
+      // Direct saves must settle (including queuing failures and reloading)
+      // before flushing the queue and deleting the exercise. Block new saves.
+      await Promise.all(pendingSetSaves.current);
       if (!isGuest() && !(await flushWorkoutSets(api, s.id)))
         throw new Error("Unsynced sets");
       const updated = await api(`/workouts/${s.id}/exercises/${removeTarget.id}`, { method: "DELETE" });
@@ -861,6 +875,7 @@ export function Workout({ done }: { done: () => void }) {
       setFinishError(tr("removeExerciseError"));
       setRemoveTarget(undefined);
     } finally {
+      removalInFlight.current = false;
       setRemoving(false);
     }
   };

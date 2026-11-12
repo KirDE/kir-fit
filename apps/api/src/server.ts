@@ -828,8 +828,8 @@ app.delete(
         WHERE id = ${sessionId} AND "userId" = ${uid} AND status = 'active'
         FOR UPDATE`;
       if (!owned.length) throw Object.assign(new Error("Active workout not found"), { status: 404 });
-      const deleted = await tx.workoutExercise.deleteMany({ where: { id: exerciseId, sessionId } });
-      if (!deleted.count) throw Object.assign(new Error("Workout exercise not found"), { status: 404 });
+      // A retry after a lost response must return the current owned session.
+      await tx.workoutExercise.deleteMany({ where: { id: exerciseId, sessionId } });
       return tx.workoutSession.findUniqueOrThrow({ where: { id: sessionId }, include: sessionInclude });
     });
     res.json(serializeSession(session));

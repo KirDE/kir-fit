@@ -71,14 +71,16 @@ describe.skipIf(!process.env.DATABASE_URL)("opt-in workout catalogue", () => {
     const remove = (sid: string, eid: string, auth = token) => request(api.app).delete(`/api/workouts/${sid}/exercises/${eid}`).set("Authorization", `Bearer ${auth}`);
     expect((await remove(active.id, target.id, otherToken)).status).toBe(404);
     expect((await remove(sessionId, target.id)).status).toBe(404);
-    expect((await remove(active.id, "missing")).status).toBe(404);
+    expect((await remove(active.id, "missing")).status).toBe(200);
     await call(`/api/workouts/${active.id}/sets`).send({ workoutExerciseId: target.id, setNumber: 1, weight: 30, reps: 8, clientMutationId: crypto.randomUUID() });
     const removed = await remove(active.id, target.id);
     expect(removed.status).toBe(200);
     expect(removed.body.exercises).toEqual([]);
     expect(await api.prisma.workoutSet.count({ where: { workoutExerciseId: target.id } })).toBe(0);
     expect(await api.prisma.workoutTemplateExercise.count({ where: { templateId } })).toBe(1);
-    expect((await remove(active.id, target.id)).status).toBe(404);
+    const retried = await remove(active.id, target.id);
+    expect(retried.status).toBe(200);
+    expect(retried.body.exercises).toEqual(removed.body.exercises);
     expect((await call(`/api/workouts/${active.id}/finish`).send({})).status).toBe(200);
     const next = await call("/api/workouts/start").send({ templateId, clientMutationId: crypto.randomUUID() });
     expect(next.body.exercises.map((e: any) => e.exercise.id)).toEqual([baseId]);

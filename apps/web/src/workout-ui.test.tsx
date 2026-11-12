@@ -198,6 +198,49 @@ describe("authenticated workout finish", () => {
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Finish workout" }));
   }
 
+  it.each([false, true])("waits for a direct set save before removal (initial failure=%s)", async (failFirst) => {
+    const active: any = await guestApi("/workouts/start", { method: "POST", body: JSON.stringify({ clientMutationId: crypto.randomUUID() }) });
+    let release!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => { release = resolve; });
+    let posts = 0;
+    let deleted = false;
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const path = String(input);
+      calls.push(`${init.method || "GET"} ${path}`);
+      if (path === "/api/workouts/active") return Response.json(deleted ? { ...active, exercises: [] } : active);
+      if (path.endsWith("/sets")) {
+        posts++;
+        if (posts === 1) return pending;
+        return Response.json({});
+      }
+      if (init.method === "DELETE") {
+        expect(posts).toBe(failFirst ? 2 : 1);
+        expect(JSON.parse(localStorage.getItem("kirfit_pending") || "[]")).toEqual([]);
+        deleted = true;
+        return Response.json({ ...active, exercises: [] });
+      }
+      throw new Error(`Unexpected ${path}`);
+    }));
+    render(<Workout done={vi.fn()} />);
+    const grid = await screen.findByLabelText("Exercises");
+    fireEvent.click(within(grid).getAllByRole("button")[0]);
+    fireEvent.change(screen.getAllByRole("spinbutton")[0], { target: { value: "20" } });
+    fireEvent.click(screen.getByRole("button", { name: /Complete set/ }));
+    await waitFor(() => expect(posts).toBe(1));
+    fireEvent.click(screen.getByLabelText("Machine menu"));
+    fireEvent.click(screen.getByRole("button", { name: "Remove machine" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove machine" }));
+    expect(deleted).toBe(false);
+    // New direct saves cannot race a pending deletion.
+    fireEvent.click(screen.getByRole("button", { name: /Complete set/ }));
+    expect(posts).toBe(1);
+    release(failFirst ? Response.json({ error: "lost response" }, { status: 503 }) : Response.json({}));
+    await waitFor(() => expect(deleted).toBe(true));
+    await screen.findByText("0 / 0 completed");
+    expect(calls.at(-1)).toContain("DELETE");
+  });
+
   it.each([false, true])("finishes after midnight with stale other-session writes (current pending=%s)", async (pending) => {
     queue(stale);
     if (pending) queue(current);
