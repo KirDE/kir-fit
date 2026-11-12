@@ -814,6 +814,27 @@ app.post(
     res.json(serializeSession(session));
   }),
 );
+// Remove only the session snapshot; its sets cascade, templates remain unchanged.
+app.delete(
+  "/api/workouts/:sessionId/exercises/:exerciseId",
+  auth,
+  asyncRoute(async (req, res) => {
+    const sessionId = String(req.params.sessionId);
+    const exerciseId = String(req.params.exerciseId);
+    const uid = userId(req);
+    const session = await prisma.$transaction(async (tx) => {
+      const owned = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "WorkoutSession"
+        WHERE id = ${sessionId} AND "userId" = ${uid} AND status = 'active'
+        FOR UPDATE`;
+      if (!owned.length) throw Object.assign(new Error("Active workout not found"), { status: 404 });
+      // A retry after a lost response must return the current owned session.
+      await tx.workoutExercise.deleteMany({ where: { id: exerciseId, sessionId } });
+      return tx.workoutSession.findUniqueOrThrow({ where: { id: sessionId }, include: sessionInclude });
+    });
+    res.json(serializeSession(session));
+  }),
+);
 app.post(
   "/api/workouts/:sessionId/sets",
   auth,

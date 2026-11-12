@@ -1127,3 +1127,12 @@
   outline-offset: 2px;
   border-radius: 8px;
 }
+
+.exercise-title-row .exercise-menu {
+  flex-shrink: 0;
+  margin: 0 18px 0 0;
+  padding: 0;
+  background: transparent;
+}
+.exercise-title-row .exercise-title { flex: 1; }
+.exercise-title-row .exercise-menu summary { width: 42px; height: 42px; }

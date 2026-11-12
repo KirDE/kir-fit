@@ -590,8 +590,40 @@ function Dashboard({
     </section>
   );
 }
+function DismissibleMenu({ children, className, menuRef }: {
+  children: React.ReactNode;
+  className: string;
+  menuRef?: React.RefObject<HTMLDetailsElement | null>;
+}) {
+  const ownRef = useRef<HTMLDetailsElement>(null);
+  const ref = menuRef || ownRef;
+  useEffect(() => {
+    const outside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !ref.current?.contains(event.target))
+        ref.current?.removeAttribute("open");
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && ref.current?.open) {
+        ref.current.removeAttribute("open");
+        ref.current.querySelector("summary")?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [ref]);
+  return <details ref={ref} className={className} onClick={(event) => {
+    if (event.target instanceof Element && event.target.closest("button"))
+      ref.current?.removeAttribute("open");
+  }}>{children}</details>;
+}
 export function Workout({ done }: { done: () => void }) {
   const workoutMenuRef = useRef<HTMLDetailsElement>(null);
+  const pendingSetSaves = useRef(new Set<Promise<void>>());
+  const removalInFlight = useRef(false);
   const [s, setS] = useState<Session | null | undefined>(),
     [index, setIndex] = useState(0),
     [exerciseOpen, setExerciseOpen] = useState(false),
@@ -600,6 +632,8 @@ export function Workout({ done }: { done: () => void }) {
     [showCompleted, setShowCompleted] = useState(false),
     [finishing, setFinishing] = useState(false),
     [finishConfirmOpen, setFinishConfirmOpen] = useState(false),
+    [removeTarget, setRemoveTarget] = useState<WorkoutExercise>(),
+    [removing, setRemoving] = useState(false),
     [workoutAction, setWorkoutAction] = useState<"cancel" | "restart" | null>(
       null,
     ),
@@ -773,29 +807,37 @@ export function Workout({ done }: { done: () => void }) {
     }
   };
   const save = async (data: any) => {
-    if (!ex) return;
-    const mutation = uuid();
-    const payload = {
-      ...data,
-      workoutExerciseId: ex.id,
-      setNumber: ex.sets.length + 1,
-      clientMutationId: mutation,
-    };
+    if (!ex || removalInFlight.current) return;
+    const saving = (async () => {
+      const mutation = uuid();
+      const payload = {
+        ...data,
+        workoutExerciseId: ex.id,
+        setNumber: ex.sets.length + 1,
+        clientMutationId: mutation,
+      };
+      try {
+        await api(`/workouts/${s.id}/sets`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        await reload();
+      } catch {
+        queue({
+          id: mutation,
+          path: `/workouts/${s.id}/sets`,
+          init: { method: "POST", body: JSON.stringify(payload) },
+        });
+        await reload().catch(() => {});
+      }
+      setRestSeconds(ex.restSeconds);
+    })();
+    pendingSetSaves.current.add(saving);
     try {
-      await api(`/workouts/${s.id}/sets`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      await reload();
-    } catch {
-      queue({
-        id: mutation,
-        path: `/workouts/${s.id}/sets`,
-        init: { method: "POST", body: JSON.stringify(payload) },
-      });
-      await reload().catch(() => {});
+      await saving;
+    } finally {
+      pendingSetSaves.current.delete(saving);
     }
-    setRestSeconds(ex.restSeconds);
   };
   const updateSettings = async (settings: {
     plannedSets: number;
@@ -811,6 +853,31 @@ export function Workout({ done }: { done: () => void }) {
       body: JSON.stringify(settings),
     });
     setS(updated);
+  };
+  const removeExercise = async () => {
+    if (!removeTarget || removalInFlight.current) return;
+    removalInFlight.current = true;
+    setRemoving(true);
+    setFinishError("");
+    try {
+      // Direct saves must settle (including queuing failures and reloading)
+      // before flushing the queue and deleting the exercise. Block new saves.
+      await Promise.all(pendingSetSaves.current);
+      if (!isGuest() && !(await flushWorkoutSets(api, s.id)))
+        throw new Error("Unsynced sets");
+      const updated = await api(`/workouts/${s.id}/exercises/${removeTarget.id}`, { method: "DELETE" });
+      setS(updated);
+      setExerciseOpen(false);
+      setIndex(0);
+      clearRest();
+      setRemoveTarget(undefined);
+    } catch {
+      setFinishError(tr("removeExerciseError"));
+      setRemoveTarget(undefined);
+    } finally {
+      removalInFlight.current = false;
+      setRemoving(false);
+    }
   };
   const deleteSet = async (setId: string) => {
     await api(`/workouts/${s.id}/sets/${setId}`, { method: "DELETE" });
@@ -863,7 +930,7 @@ export function Workout({ done }: { done: () => void }) {
           )}{" "}
           min
         </span>
-        <details ref={workoutMenuRef} className="workout-menu">
+        <DismissibleMenu menuRef={workoutMenuRef} className="workout-menu">
           <summary aria-label={tr("workoutMenu")}>
             <EllipsisVertical />
           </summary>
@@ -892,11 +959,11 @@ export function Workout({ done }: { done: () => void }) {
               <Trash2 /> {tr("cancelWorkout")}
             </button>
           </div>
-        </details>
+        </DismissibleMenu>
       </div>
       <div className="progressbar">
         <i
-          style={{ width: `${(completedCount / s.exercises.length) * 100}%` }}
+          style={{ width: `${(completedCount / Math.max(1, s.exercises.length)) * 100}%` }}
         />
       </div>
       {finishError && <p className="error workout-error">{finishError}</p>}
@@ -958,6 +1025,7 @@ export function Workout({ done }: { done: () => void }) {
             save={save}
             deleteSet={deleteSet}
             updateSettings={updateSettings}
+            removeExercise={() => setRemoveTarget(ex)}
           />
           <div className="exercise-nav">
             <button
@@ -994,6 +1062,16 @@ export function Workout({ done }: { done: () => void }) {
           </button>
         </div>
       )}
+      <ConfirmDialog
+        open={!!removeTarget}
+        title={tr("removeExercise")}
+        text={tr("removeExerciseConfirm")}
+        confirmLabel={tr("removeExercise")}
+        danger
+        busy={removing}
+        onCancel={() => setRemoveTarget(undefined)}
+        onConfirm={() => void removeExercise()}
+      />
       <ConfirmDialog
         open={finishConfirmOpen}
         title={tr("finish")}
@@ -1156,8 +1234,10 @@ function ExerciseCard({
   save,
   deleteSet,
   updateSettings,
+  removeExercise,
 }: {
   ex: WorkoutExercise;
+  removeExercise: () => void;
   save: (v: any) => void;
   deleteSet: (setId: string) => Promise<void>;
   updateSettings: (v: {
@@ -1235,6 +1315,12 @@ function ExerciseCard({
         >
           <SlidersHorizontal />
         </button>
+        <DismissibleMenu className="workout-menu exercise-menu">
+          <summary aria-label={tr("exerciseMenu")}><EllipsisVertical /></summary>
+          <div><button type="button" className="danger" onClick={removeExercise}>
+            <Trash2 /> {tr("removeExercise")}
+          </button></div>
+        </DismissibleMenu>
       </div>
       {settingsOpen && (
         <div
@@ -1401,7 +1487,7 @@ function ExerciseCard({
         >
           {tr("completeSet")}
         </button>
-        <details className="rir-disclosure">
+        <DismissibleMenu className="rir-disclosure">
           <summary aria-label="RIR">
             <Ellipsis />
             {rir !== null && <small>RIR {rir === 4 ? "4+" : rir}</small>}
@@ -1421,7 +1507,7 @@ function ExerciseCard({
               </button>
             ))}
           </div>
-        </details>
+        </DismissibleMenu>
       </div>
     </div>
   );
@@ -1492,14 +1578,14 @@ function RestTimer({
           {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}
         </strong>
       </div>
-      <details ref={menuRef} className="rest-menu">
+      <DismissibleMenu menuRef={menuRef} className="rest-menu">
         <summary aria-label={tr("restMenu")}><Ellipsis /></summary>
         <div>
           <button type="button" onClick={() => adjust(-30)}>−30s</button>
           <button type="button" onClick={() => adjust(30)}>+30s</button>
           <button type="button" onClick={skip}>{tr("skip")}</button>
         </div>
-      </details>
+      </DismissibleMenu>
     </div>
   );
 }
