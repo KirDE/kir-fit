@@ -998,7 +998,7 @@ export function Workout({ done }: { done: () => void }) {
                 type="button"
                 className="workout-machine-tile"
                 key={exercise.id}
-                aria-label={name}
+                aria-label={`${name} — ${exercise.sets.length} / ${exercise.plannedSets} ${tr("sets")}`}
                 onClick={() => {
                   setIndex(exerciseIndex);
                   setExerciseOpen(true);

@@ -112,7 +112,8 @@ describe("active workout menu", () => {
     render(<Workout done={vi.fn()} />);
     const grid = await screen.findByLabelText("Exercises");
     const tiles = within(grid).getAllByRole("button");
-    const names = tiles.map((tile) => tile.getAttribute("aria-label")!);
+    const names = tiles.map((tile) => tile.querySelector(".workout-machine-name")!.textContent!);
+    expect(tiles[0].getAttribute("aria-label")).toMatch(/0 \/ 3 sets/i);
     expect(tiles.length).toBeGreaterThan(2);
     expect(screen.queryByRole("button", { name: "Exercise settings" })).toBeNull();
     fireEvent.click(tiles[1]);

@@ -1138,12 +1138,12 @@
 .exercise-title-row .exercise-menu summary { width: 42px; height: 42px; }
 
 /* Match the workout's overall progress line, directly below each machine image. */
-.machine-progress {
+.progressbar.machine-progress {
   display: block;
   width: 100%;
   margin: 0;
   border-radius: 0;
 }
 @media (prefers-reduced-motion: reduce) {
-  .machine-progress i { transition: none; }
+  .progressbar.machine-progress i { transition: none; }
 }
