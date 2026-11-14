@@ -998,7 +998,7 @@ export function Workout({ done }: { done: () => void }) {
                 type="button"
                 className="workout-machine-tile"
                 key={exercise.id}
-                aria-label={name}
+                aria-label={`${name} — ${exercise.sets.length} / ${exercise.plannedSets} ${tr("sets")}`}
                 onClick={() => {
                   setIndex(exerciseIndex);
                   setExerciseOpen(true);
@@ -1009,6 +1009,7 @@ export function Workout({ done }: { done: () => void }) {
                   alt=""
                   loading="lazy"
                 />
+                <MachineProgress ex={exercise} />
                 <span className="workout-machine-name">{name}</span>
                 <small>
                   {completed && <Check size={14} aria-hidden="true" />}
@@ -1229,6 +1230,24 @@ function ZoomableImage({
     </>
   );
 }
+function MachineProgress({ ex }: { ex: WorkoutExercise }) {
+  const total = Math.max(1, ex.plannedSets);
+  const completed = Math.min(total, Math.max(0, ex.sets.length));
+  return (
+    <span
+      className="progressbar machine-progress"
+      role="progressbar"
+      aria-label={`${ex.customName || localizedName(ex.exercise)} — ${tr("sets")}`}
+      aria-valuemin={0}
+      aria-valuemax={total}
+      aria-valuenow={completed}
+      aria-valuetext={`${ex.sets.length} / ${ex.plannedSets} ${tr("sets")}`}
+    >
+      <i style={{ width: `${(completed / total) * 100}%` }} />
+    </span>
+  );
+}
+
 function ExerciseCard({
   ex,
   save,
@@ -1295,6 +1314,7 @@ function ExerciseCard({
           </>
         }
       />
+      <MachineProgress ex={ex} />
       <div className="exercise-title-row">
         <div className="exercise-title">
           <p className="eyebrow">
